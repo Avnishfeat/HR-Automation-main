@@ -1,0 +1,77 @@
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+import logging
+
+from app.core.config import settings
+from app.services.database import DatabaseService
+from app.core.dependencies import get_websocket_manager
+
+# Import agent routers
+from app.agents.example_agent.router import router as example_agent_router
+from app.agents.talent_matcher.router import router as talent_matcher_router  # <-- NEW
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup and shutdown events"""
+    # Startup
+    logger.info("🚀 Starting Multi-Agent Platform...")
+    await DatabaseService.connect_db(settings.MONGODB_URL)
+    logger.info("✅ Application started successfully")
+    
+    yield
+    
+    # Shutdown
+    logger.info("🛑 Shutting down...")
+    await DatabaseService.close_db()
+    logger.info("✅ Application shut down successfully")
+
+# Create FastAPI app
+app = FastAPI(
+    title=settings.APP_NAME,
+    version=settings.APP_VERSION,
+    lifespan=lifespan
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include routers
+app.include_router(example_agent_router, prefix="/api/v1")
+app.include_router(talent_matcher_router, prefix="/api/v1/talent-matcher")  # <-- NEW
+
+# Root endpoint
+@app.get("/")
+async def root():
+    return {
+        "message": "Multi-Agent Platform API",
+        "version": settings.APP_VERSION,
+        "docs": "/docs"
+    }
+
+# WebSocket example endpoint
+@app.websocket("/ws/{client_id}")
+async def websocket_endpoint(websocket: WebSocket, client_id: str):
+    """WebSocket endpoint example"""
+    manager = get_websocket_manager()
+    await manager.connect(websocket, client_id)
+    
+    try:
+        while True:
+            data = await websocket.receive_text()
+            await manager.send_message(f"Echo: {data}", client_id)
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, client_id)
