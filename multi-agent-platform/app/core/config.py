@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     
     # LLM API Keys
     GEMINI_API_KEY: Optional[str] = None
+    GENAI_MODEL: str = "gemini-2.5-flash"
     OPENAI_API_KEY: Optional[str] = None
     
     # File Upload

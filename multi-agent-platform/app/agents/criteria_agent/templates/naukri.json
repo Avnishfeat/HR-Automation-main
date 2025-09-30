@@ -1,0 +1,8 @@
+{
+    "keywords": "string of comma-separated keywords",
+    "location": "string or null",
+    "experience_in_years": "string (e.g., '3-5')",
+    "functional_area": "string or null",
+    "role": "string or null",
+    "key_skills": ["list", "of", "skills"]
+}

@@ -1,0 +1,16 @@
+You are an expert HR assistant. Write a professional Job Description for the role of Software Developer / Engineer.
+
+Include sections:
+1. Job Title
+2. Overview
+3. Key Responsibilities
+4. Requirements
+5. Preferred Qualifications
+6. Location
+7. Job-Type
+
+Experience required: {{ EXPERIENCE }}
+Candidate requirements:
+{{ REQUIREMENTS }}
+
+Keep the tone formal, concise, and industry-standard.

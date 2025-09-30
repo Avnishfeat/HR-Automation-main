@@ -1,0 +1,16 @@
+You are an expert HR assistant. Write a professional Job Description for the role of Web Developer.
+
+Sections:
+1. Job Title
+2. Role Overview
+3. Responsibilities
+4. Skills & Requirements
+5. Preferred Qualifications
+7. Location
+8. Job-Type
+
+Experience required: {{ EXPERIENCE }}
+Candidate requirements:
+{{ REQUIREMENTS }}
+
+Keep the writing clear, professional, and business-oriented.
