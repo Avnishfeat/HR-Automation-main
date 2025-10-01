@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from .schemas import JobPostRequest
-from .services import JobPostAgentService
+from .service import JobPostAgentService
 from app.core.dependencies import get_llm_service
 
 router = APIRouter(prefix="/job-post-agent", tags=["Job Post Agent"])
