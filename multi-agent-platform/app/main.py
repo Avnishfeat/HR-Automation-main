@@ -21,7 +21,8 @@ from app.core.dependencies import get_websocket_manager
 from app.agents.jd_agent.router import router as jd_router
 from app.agents.example_agent.router import router as example_agent_router
 from app.agents.criteria_agent.router import router as criteria_router
-
+from app.agents.job_post_agent.router import router as job_post_router
+from app.agents.talent_matcher.router import router as talent_matcher_router
 
 # Setup logging
 logging.basicConfig(
@@ -68,7 +69,8 @@ app.add_middleware(
 app.include_router(example_agent_router, prefix="/api/v1/example", tags=["Example Agent"])
 app.include_router(jd_router, prefix="/api/v1/jd", tags=["Job Description Agent"])
 app.include_router(criteria_router, prefix="/api/v1/criteria", tags=["Candidate Criteria Agent"])
-
+app.include_router(job_post_router, prefix="/api/v1", tags=["Candidate job_post_agent"])
+app.include_router(talent_matcher_router, prefix="/api/v1/talent_matcher", tags=["Candidate talent_matcher_router"])
 # Root endpoint
 @app.get("/")
 async def root():
