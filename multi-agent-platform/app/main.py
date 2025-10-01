@@ -1,15 +1,27 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
+# app/main.py
+
+# STEP 1: Load environment variables at the very top
+from dotenv import load_dotenv
+load_dotenv()
+
+# --- Standard Library Imports ---
 from contextlib import asynccontextmanager
 import logging
 
+# --- Third-Party Imports ---
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+
+# --- Application-Specific Imports ---
 from app.core.config import settings
 from app.services.database import DatabaseService
 from app.core.dependencies import get_websocket_manager
 
 # Import agent routers
+from app.agents.jd_agent.router import router as jd_router
 from app.agents.example_agent.router import router as example_agent_router
-from app.agents.talent_matcher.router import router as talent_matcher_router  # <-- NEW
+from app.agents.criteria_agent.router import router as criteria_router
+
 
 # Setup logging
 logging.basicConfig(
@@ -17,6 +29,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -32,6 +45,7 @@ async def lifespan(app: FastAPI):
     logger.info("🛑 Shutting down...")
     await DatabaseService.close_db()
     logger.info("✅ Application shut down successfully")
+
 
 # Create FastAPI app
 app = FastAPI(
@@ -49,9 +63,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
-app.include_router(example_agent_router, prefix="/api/v1")
-app.include_router(talent_matcher_router, prefix="/api/v1/talent-matcher")  # <-- NEW
+# --- Include Routers ---
+# STEP 3: Define full, unique prefixes for each agent for clarity
+app.include_router(example_agent_router, prefix="/api/v1/example", tags=["Example Agent"])
+app.include_router(jd_router, prefix="/api/v1/jd", tags=["Job Description Agent"])
+app.include_router(criteria_router, prefix="/api/v1/criteria", tags=["Candidate Criteria Agent"])
 
 # Root endpoint
 @app.get("/")
@@ -61,6 +77,7 @@ async def root():
         "version": settings.APP_VERSION,
         "docs": "/docs"
     }
+
 
 # WebSocket example endpoint
 @app.websocket("/ws/{client_id}")

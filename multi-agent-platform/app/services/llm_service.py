@@ -1,83 +1,50 @@
-from typing import Optional, Dict, Any, Literal
-from abc import ABC, abstractmethod
+# app/services/llm_service.py
+
 import logging
+import google.generativeai as genai
+from fastapi import HTTPException
+from starlette.concurrency import run_in_threadpool
 
-logger = logging.getLogger(__name__)
-
-class BaseLLMProvider(ABC):
-    """Base class for LLM providers"""
-    
-    @abstractmethod
-    async def generate(self, prompt: str, **kwargs) -> str:
-        pass
-
-class GeminiProvider(BaseLLMProvider):
-    """Gemini LLM Provider"""
-    
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        # Initialize Gemini client here
-        logger.info("🤖 Gemini provider initialized")
-    
-    async def generate(self, prompt: str, **kwargs) -> str:
-        # Implement Gemini API call
-        # This is a placeholder
-        return f"Gemini response to: {prompt[:50]}..."
-
-class OpenAIProvider(BaseLLMProvider):
-    """OpenAI LLM Provider"""
-    
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        # Initialize OpenAI client here
-        logger.info("🤖 OpenAI provider initialized")
-    
-    async def generate(self, prompt: str, **kwargs) -> str:
-        # Implement OpenAI API call
-        # This is a placeholder
-        return f"OpenAI response to: {prompt[:50]}..."
-
-class LocalModelProvider(BaseLLMProvider):
-    """Local Model Provider"""
-    
-    def __init__(self, model_path: str):
-        self.model_path = model_path
-        # Load local model here
-        logger.info(f"🤖 Local model loaded from: {model_path}")
-    
-    async def generate(self, prompt: str, **kwargs) -> str:
-        # Implement local model inference
-        # This is a placeholder
-        return f"Local model response to: {prompt[:50]}..."
+logger = logging.getLogger("llm_service")
 
 class LLMService:
     """
-    LLM Service - Factory for different LLM providers
+    A centralized service to handle all interactions with the Large Language Model (LLM).
     """
-    
-    def __init__(self):
-        self.providers: Dict[str, BaseLLMProvider] = {}
-    
-    def register_provider(self, name: str, provider: BaseLLMProvider):
-        """Register a new LLM provider"""
-        self.providers[name] = provider
-        logger.info(f"✅ Registered provider: {name}")
-    
-    async def generate(
-        self, 
-        prompt: str, 
-        provider: str = "gemini",
-        **kwargs
-    ) -> str:
+    def __init__(self, settings):
+        self.model = None
+        try:
+            # Get the API key from the settings object, based on your preference
+            api_key = settings.GEMINI_API_KEY
+            if not api_key:
+                # Corrected the error message to be consistent
+                raise ValueError("GEMINI_API_KEY not found in settings.")
+            
+            genai.configure(api_key=api_key)
+            
+            # Get the model name from settings, with a fallback default.
+            model_name = settings.GENAI_MODEL or "gemini-2.5-flash"
+            self.model = genai.GenerativeModel(model_name)
+            logger.info(f"LLMService initialized successfully with model: {model_name}")
+
+        except Exception as e:
+            logger.critical(f"Fatal error during LLMService initialization: {e}")
+            # If the service can't start, self.model will remain None
+
+    # This method is now async to avoid blocking the server
+    async def generate_text(self, prompt: str) -> str:
         """
-        Generate text using specified provider
-        
-        Args:
-            prompt: Input prompt
-            provider: Provider name (gemini, openai, local)
-            **kwargs: Additional parameters
+        Asynchronously generates text using the configured LLM.
         """
-        if provider not in self.providers:
-            raise ValueError(f"Provider '{provider}' not registered")
+        if not self.model:
+            raise HTTPException(status_code=503, detail="LLM service is not configured or available.")
         
-        return await self.providers[provider].generate(prompt, **kwargs)
+        try:
+            # Run the synchronous, blocking SDK call in a separate thread
+            response = await run_in_threadpool(self.model.generate_content, prompt)
+            return response.text.strip()
+        except Exception as e:
+            logger.error(f"LLM API call failed: {e}")
+            raise HTTPException(status_code=502, detail=f"An unexpected error occurred with the AI service: {e}")
+
+# NOTE: The singleton instance of this class should be created in your dependencies.py file.

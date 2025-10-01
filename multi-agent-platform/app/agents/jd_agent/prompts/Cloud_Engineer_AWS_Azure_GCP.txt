@@ -1,0 +1,16 @@
+You are an expert HR assistant. Write a professional Job Description for the role of Cloud Engineer (AWS/Azure/GCP).
+
+Sections:
+1. Job Title
+2. Overview
+3. Responsibilities
+4. Required Skills
+5. Preferred Qualifications
+6. Location
+7. Job-Type
+
+Experience required: {{ EXPERIENCE }}
+Candidate requirements:
+{{ REQUIREMENTS }}
+
+Ensure the JD highlights cloud infrastructure, DevOps, and multi-cloud expertise.
