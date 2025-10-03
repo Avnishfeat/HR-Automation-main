@@ -21,6 +21,8 @@ from app.core.dependencies import get_websocket_manager
 from app.agents.jd_agent.router import router as jd_router
 from app.agents.example_agent.router import router as example_agent_router
 from app.agents.criteria_agent.router import router as criteria_router
+from app.agents.job_post_agent.router import router as job_post_agent_router
+from app.agents.talent_matcher.router import router as talent_matcher_router
 
 
 # Setup logging
@@ -63,13 +65,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Include Routers ---
-# STEP 3: Define full, unique prefixes for each agent for clarity
+
 app.include_router(example_agent_router, prefix="/api/v1/example", tags=["Example Agent"])
 app.include_router(jd_router, prefix="/api/v1/jd", tags=["Job Description Agent"])
 app.include_router(criteria_router, prefix="/api/v1/criteria", tags=["Candidate Criteria Agent"])
+app.include_router(job_post_agent_router,prefix="/api/v1", tags=["Job Post Agent"])
+app.include_router(talent_matcher_router,prefix="/api/v1/talent_matcher", tags=["Talent Matcher Agent"])
 
-# Root endpoint
+
 @app.get("/")
 async def root():
     return {

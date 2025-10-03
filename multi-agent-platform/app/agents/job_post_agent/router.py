@@ -1,6 +1,8 @@
+# app/agents/job_post_agent/router.py
+
 from fastapi import APIRouter, Depends, HTTPException
 from .schemas import JobPostRequest
-from .services import JobPostAgentService
+from .service import JobPostAgentService
 from app.core.dependencies import get_llm_service
 
 router = APIRouter(prefix="/job-post-agent", tags=["Job Post Agent"])
@@ -16,6 +18,17 @@ async def generate_job_post(
             platform=request.platform,
             job_description=request.job_description
         )
-        return {"platform": request.platform, "generated_post": result["result"]}
+        
+        # --- ADD 'status: True' TO THE SUCCESSFUL RESPONSE ---
+        return {
+            "status": True,
+            "platform": request.platform,
+            "generated_post": result["result"]
+        }
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # --- MODIFY THE ERROR RESPONSE TO INCLUDE 'status: False' ---
+        raise HTTPException(
+            status_code=500, 
+            detail={"status": False, "error": str(e)}
+        )
