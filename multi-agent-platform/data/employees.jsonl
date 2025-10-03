@@ -48,3 +48,122 @@
 {"name": "Vera Adams", "title": "React Developer", "skills": ["React", "JavaScript", "REST APIs"], "Key_Credentials": "Bachelor of Science", "experience_years": 3}
 {"name": "Will Brown", "title": "Senior DevOps Engineer", "skills": ["Kubernetes", "Azure", "Terraform", "CI/CD"], "Key_Credentials": "Master of Engineering", "experience_years": 10}
 {"name": "Yvonne Chan", "title": "Database Developer", "skills": ["Oracle", "PL/SQL", "ETL", "Data Modeling"], "Key_Credentials": "Bachelor of Science", "experience_years": 6}
+{"name": "Zoe Allen", "title": "Network Engineer", "skills": ["Cisco", "Juniper", "Routing", "Switching"], "Key_Credentials": "Bachelor of Science", "experience_years": 8}
+{"name": "Aaron Hill", "title": "Business Analyst", "skills": ["Requirements Gathering", "SQL", "Agile", "Visio"], "Key_Credentials": "MBA", "experience_years": 6}
+{"name": "Bella Cook", "title": "IT Support Specialist", "skills": ["Active Directory", "Troubleshooting", "Windows", "Office 365"], "Key_Credentials": "Associate Degree", "experience_years": 4}
+{"name": "Caleb Rivera", "title": "Lead Software Engineer", "skills": ["Java", "Spring Boot", "Team Leadership", "Architecture"], "Key_Credentials": "Master of Science", "experience_years": 12}
+{"name": "Daisy Morgan", "title": "Scrum Master", "skills": ["Scrum", "Agile Coaching", "JIRA", "Facilitation"], "Key_Credentials": "Bachelor of Arts", "experience_years": 7}
+{"name": "Elijah Bailey", "title": "Solutions Architect", "skills": ["AWS", "Solution Design", "Pre-sales", "Cloud Migration"], "Key_Credentials": "Master of Engineering", "experience_years": 14}
+{"name": "Faith Howard", "title": "Automation Engineer", "skills": ["Python", "Selenium", "CI/CD", "Test Automation"], "Key_Credentials": "Bachelor of Science", "experience_years": 5}
+{"name": "Gabriel Ward", "title": "Systems Engineer", "skills": ["Linux", "VMware", "Ansible", "Networking"], "Key_Credentials": "Bachelor of Science", "experience_years": 9}
+{"name": "Hannah Reed", "title": "Content Strategist", "skills": ["Content Marketing", "SEO", "Copywriting", "Analytics"], "Key_Credentials": "Bachelor of Arts", "experience_years": 6}
+{"name": "Isaac Cooper", "title": "Android Developer", "skills": ["Kotlin", "Java", "Android Studio", "Firebase"], "Key_Credentials": "Bachelor of Computer Science", "experience_years": 4}
+{"name": "Jasmine Gray", "title": "Cloud Consultant", "skills": ["GCP", "Cloud Strategy", "Cost Optimization", "Security"], "Key_Credentials": "Master of Science", "experience_years": 10}
+{"name": "Leo Henderson", "title": "Principal Data Scientist", "skills": ["Deep Learning", "NLP", "Python", "Research"], "Key_Credentials": "PhD", "experience_years": 18}
+{"name": "Madison Coleman", "title": "IT Project Manager", "skills": ["PMP", "Agile", "Budgeting", "Risk Management"], "Key_Credentials": "MBA", "experience_years": 11}
+{"name": "Nathan Simmons", "title": "AI Engineer", "skills": ["TensorFlow", "PyTorch", "Computer Vision", "Python"], "Key_Credentials": "Master of Science", "experience_years": 5}
+{"name": "Penelope Bryant", "title": "Technical Program Manager", "skills": ["Program Management", "Stakeholder Communication", "Roadmapping"], "Key_Credentials": "Master of Engineering", "experience_years": 9}
+{"name": "Owen Patterson", "title": "Junior Web Developer", "skills": ["HTML", "CSS", "JavaScript", "jQuery"], "Key_Credentials": "Associate Degree", "experience_years": 1}
+{"name": "Riley Jenkins", "title": "DevOps Manager", "skills": ["Team Leadership", "CI/CD Strategy", "AWS", "Budgeting"], "Key_Credentials": "Master of Science", "experience_years": 13}
+{"name": "Stella Powell", "title": "User Researcher", "skills": ["User Interviews", "Surveys", "Usability Testing", "Qualitative Analysis"], "Key_Credentials": "Bachelor of Arts", "experience_years": 4}
+{"name": "Theodore Sanders", "title": "Firmware Engineer", "skills": ["C", "Embedded Systems", "RTOS", "Microcontrollers"], "Key_Credentials": "Master of Engineering", "experience_years": 8}
+{"name": "Violet Long", "title": "Graphic Designer", "skills": ["Adobe Creative Suite", "Illustrator", "Photoshop", "Branding"], "Key_Credentials": "Bachelor of Fine Arts", "experience_years": 5}
+{"name": "Wyatt Price", "title": "Chief Technology Officer", "skills": ["Technology Strategy", "Leadership", "Innovation", "Budgeting"], "Key_Credentials": "PhD", "experience_years": 22}
+{"name": "Ximena Ross", "title": "Senior QA Engineer", "skills": ["Automated Testing", "Performance Testing", "Selenium", "API Testing"], "Key_Credentials": "Bachelor of Science", "experience_years": 7}
+{"name": "Zachary James", "title": "Data Warehouse Architect", "skills": ["ETL", "Data Modeling", "SQL Server", "Big Data"], "Key_Credentials": "Master of Science", "experience_years": 15}
+{"name": "Aaliyah Washington", "title": "IT Director", "skills": ["IT Management", "Strategy", "Vendor Management", "Infrastructure"], "Key_Credentials": "MBA", "experience_years": 18}
+{"name": "Adrian Brooks", "title": "Junior DevOps Engineer", "skills": ["Docker", "Jenkins", "Bash Scripting", "AWS"], "Key_Credentials": "Bachelor of Science", "experience_years": 2}
+{"name": "Brielle Hughes", "title": "Marketing Director", "skills": ["Marketing Strategy", "Team Leadership", "Brand Management"], "Key_Credentials": "Master of Business", "experience_years": 14}
+{"name": "Christian Watson", "title": "Senior Backend Developer", "skills": ["Go", "Microservices", "PostgreSQL", "System Design"], "Key_Credentials": "Master of Science", "experience_years": 9}
+{"name": "Delilah Griffin", "title": "Product Designer", "skills": ["UX/UI", "Figma", "Design Systems", "Prototyping"], "Key_Credentials": "Bachelor of Fine Arts", "experience_years": 6}
+{"name": "Elias Peterson", "title": "Cloud Security Engineer", "skills": ["AWS Security", "Azure Security", "Compliance", "SIEM"], "Key_Credentials": "Master of Engineering", "experience_years": 7}
+{"name": "Gabriella Diaz", "title": "Senior Full Stack Engineer", "skills": ["React", "Node.js", "GraphQL", "TypeScript"], "Key_Credentials": "Master of Science", "experience_years": 8}
+{"name": "Hudson Barnes", "title": "Network Administrator", "skills": ["Firewalls", "VPN", "Cisco IOS", "Troubleshooting"], "Key_Credentials": "Associate Degree", "experience_years": 6}
+{"name": "Isla Richardson", "title": "Machine Learning Scientist", "skills": ["Research", "Python", "NLP", "Statistics"], "Key_Credentials": "PhD", "experience_years": 11}
+{"name": "Jayden Cox", "title": "Software Development Manager", "skills": ["Agile", "Project Management", "Team Leadership", "Java"], "Key_Credentials": "MBA", "experience_years": 16}
+{"name": "Kaylee Edwards", "title": "BI Analyst", "skills": ["Tableau", "SQL", "Data Analysis", "Reporting"], "Key_Credentials": "Bachelor of Science", "experience_years": 4}
+{"name": "Lincoln Stewart", "title": "Senior Cloud Architect", "skills": ["GCP", "Multi-Cloud Strategy", "Kubernetes", "Architecture"], "Key_Credentials": "Master of Engineering", "experience_years": 17}
+{"name": "Maya Morris", "title": "iOS Engineer", "skills": ["SwiftUI", "Combine", "Core Data", "Objective-C"], "Key_Credentials": "Bachelor of Computer Science", "experience_years": 5}
+{"name": "Nicholas Nguyen", "title": "Principal Software Engineer", "skills": ["Python", "Distributed Systems", "Scalability", "Mentoring"], "Key_Credentials": "Master of Science", "experience_years": 15}
+{"name": "Paisley Murphy", "title": "Head of Product", "skills": ["Product Strategy", "Leadership", "Market Analysis", "Roadmapping"], "Key_Credentials": "MBA", "experience_years": 19}
+{"name": "Roman Rogers", "title": "Information Security Officer", "skills": ["CISSP", "Risk Management", "Policy", "Compliance"], "Key_Credentials": "Master of Science", "experience_years": 12}
+{"name": "Serenity Simmons", "title": "Junior Data Scientist", "skills": ["Python", "Pandas", "Scikit-learn", "SQL"], "Key_Credentials": "Master of Science", "experience_years": 2}
+{"name": "Thomas Russell", "title": "Lead Frontend Developer", "skills": ["React", "TypeScript", "Performance", "Team Lead"], "Key_Credentials": "Bachelor of Science", "experience_years": 10}
+{"name": "Willow Perry", "title": "Chief Information Officer", "skills": ["IT Strategy", "Digital Transformation", "Executive Leadership"], "Key_Credentials": "MBA", "experience_years": 25}
+{"name": "Adam Wright", "title": "Lead DevOps Engineer", "skills": ["Kubernetes", "AWS", "Terraform", "Team Leadership"], "Key_Credentials": "Master of Engineering", "experience_years": 11}
+{"name": "Aria Mitchell", "title": "Senior Product Manager", "skills": ["Product Strategy", "Go-to-market", "Agile", "User Research"], "Key_Credentials": "MBA", "experience_years": 9}
+{"name": "Asher Bell", "title": "Junior Security Analyst", "skills": ["SIEM", "Vulnerability Scanning", "Log Analysis", "Linux"], "Key_Credentials": "Bachelor of Science", "experience_years": 1}
+{"name": "Aurora Flores", "title": "Lead Data Engineer", "skills": ["Spark", "Airflow", "Kafka", "Python", "Team Lead"], "Key_Credentials": "Master of Science", "experience_years": 10}
+{"name": "Beau Torres", "title": "Senior Database Administrator", "skills": ["Oracle", "Performance Tuning", "Backup & Recovery", "SQL"], "Key_Credentials": "Bachelor of Science", "experience_years": 13}
+{"name": "Clara Scott", "title": "Director of Engineering", "skills": ["Engineering Management", "Technical Strategy", "Hiring", "Budgeting"], "Key_Credentials": "Master of Science", "experience_years": 16}
+{"name": "Daniel Ramirez", "title": "Software Architect", "skills": ["Microservices", "System Design", "Java", "Cloud Native"], "Key_Credentials": "Master of Engineering", "experience_years": 14}
+{"name": "Eleanor Hill", "title": "UI Developer", "skills": ["React", "CSS", "Storybook", "Accessibility"], "Key_Credentials": "Bachelor of Science", "experience_years": 4}
+{"name": "Ezra Green", "title": "Lead Mobile Developer", "skills": ["iOS", "Android", "React Native", "Team Leadership"], "Key_Credentials": "Bachelor of Computer Science", "experience_years": 9}
+{"name": "Gianna King", "title": "Senior UX Researcher", "skills": ["Qualitative Research", "Quantitative Research", "Journey Mapping"], "Key_Credentials": "PhD", "experience_years": 8}
+{"name": "Jasper Lee", "title": "Cloud FinOps Specialist", "skills": ["Cost Optimization", "AWS Cost Explorer", "Cloud Financials", "Budgeting"], "Key_Credentials": "Bachelor of Business", "experience_years": 5}
+{"name": "Josephine Harris", "title": "Data Governance Manager", "skills": ["Data Quality", "MDM", "Compliance", "Data Stewardship"], "Key_Credentials": "Master of Science", "experience_years": 11}
+{"name": "Josiah Clark", "title": "Embedded Software Engineer", "skills": ["C++", "RTOS", "Linux Kernel", "Device Drivers"], "Key_Credentials": "Master of Engineering", "experience_years": 7}
+{"name": "Luna Lewis", "title": "Senior Content Writer", "skills": ["Copywriting", "SEO", "Technical Writing", "Blogging"], "Key_Credentials": "Bachelor of Arts", "experience_years": 6}
+{"name": "Mateo Walker", "title": "Principal Cloud Engineer", "skills": ["Azure", "Infrastructure as Code", "Security", "Architecture"], "Key_Credentials": "Master of Engineering", "experience_years": 16}
+{"name": "Naomi Hall", "title": "QA Manager", "skills": ["Test Strategy", "Team Management", "Automation Frameworks", "Agile"], "Key_Credentials": "Bachelor of Science", "experience_years": 12}
+{"name": "Robert Allen", "title": "Senior Systems Administrator", "skills": ["Windows Server", "Active Directory", "PowerShell", "VMware"], "Key_Credentials": "Bachelor of Science", "experience_years": 11}
+{"name": "Scarlett Young", "title": "VP of Marketing", "skills": ["Marketing Leadership", "Brand Strategy", "P&L Management", "Growth Marketing"], "Key_Credentials": "MBA", "experience_years": 20}
+{"name": "Abigail Hernandez", "title": "Machine Learning Engineer", "skills": ["Python", "TensorFlow", "Kubeflow", "MLOps"], "Key_Credentials": "Master of Science", "experience_years": 4}
+{"name": "Angel King", "title": "Full Stack Developer", "skills": ["Angular", "Spring Boot", "Java", "TypeScript"], "Key_Credentials": "Bachelor of Science", "experience_years": 5}
+{"name": "Avery Wright", "title": "Network Security Engineer", "skills": ["Firewalls", "Palo Alto", "VPN", "Intrusion Detection"], "Key_Credentials": "Bachelor of Science", "experience_years": 7}
+{"name": "Benjamin Scott", "title": "Lead Game Designer", "skills": ["Game Mechanics", "Level Design", "Unity", "Team Leadership"], "Key_Credentials": "Bachelor of Arts", "experience_years": 10}
+{"name": "Camila Green", "title": "Senior Data Analyst", "skills": ["SQL", "Python", "Tableau", "Statistical Analysis"], "Key_Credentials": "Master of Science", "experience_years": 6}
+{"name": "Carter Adams", "title": "IT Auditor", "skills": ["SOX", "ITGC", "Risk Assessment", "CISA"], "Key_Credentials": "Bachelor of Business", "experience_years": 5}
+{"name": "Charlotte Baker", "title": "Head of Design", "skills": ["Design Leadership", "UX Strategy", "Brand Identity", "Team Management"], "Key_Credentials": "Master of Fine Arts", "experience_years": 15}
+{"name": "David Nelson", "title": "Senior Java Developer", "skills": ["Java", "Microservices", "Spring", "Kafka"], "Key_Credentials": "Master of Science", "experience_years": 9}
+{"name": "Elizabeth Carter", "title": "Digital Project Manager", "skills": ["Agile", "Scrum", "JIRA", "Client Communication"], "Key_Credentials": "Bachelor of Arts", "experience_years": 6}
+{"name": "Emily Mitchell", "title": "Junior Software Engineer", "skills": ["Java", "SQL", "Git", "Spring"], "Key_Credentials": "Bachelor of Science", "experience_years": 1}
+{"name": "Ethan Perez", "title": "Cloud Native Engineer", "skills": ["Kubernetes", "Go", "Prometheus", "Service Mesh"], "Key_Credentials": "Bachelor of Science", "experience_years": 5}
+{"name": "Evelyn Roberts", "title": "Senior UX Designer", "skills": ["Figma", "User-Centered Design", "Interaction Design", "Prototyping"], "Key_Credentials": "Bachelor of Fine Arts", "experience_years": 7}
+{"name": "Grayson Turner", "title": "Principal Machine Learning Engineer", "skills": ["Python", "PyTorch", "System Design", "Mentoring"], "Key_Credentials": "PhD", "experience_years": 14}
+{"name": "Harper Phillips", "title": "Director of Product Management", "skills": ["Product Strategy", "Team Leadership", "P&L Management", "Market Research"], "Key_Credentials": "MBA", "experience_years": 17}
+{"name": "Henry Campbell", "title": "IT Manager", "skills": ["IT Operations", "Team Management", "Budgeting", "Vendor Relations"], "Key_Credentials": "Master of Business", "experience_years": 13}
+{"name": "Isabella Parker", "title": "Lead Backend Engineer", "skills": ["Node.js", "System Architecture", "Microservices", "Team Lead"], "Key_Credentials": "Master of Science", "experience_years": 11}
+{"name": "Jack Evans", "title": "Senior Cybersecurity Consultant", "skills": ["Penetration Testing", "Red Teaming", "Threat Modeling", "Compliance"], "Key_Credentials": "Master of Science", "experience_years": 10}
+{"name": "Jackson Collins", "title": "Lead UI/UX Designer", "skills": ["Figma", "Design Systems", "Leadership", "UX Strategy"], "Key_Credentials": "Master of Fine Arts", "experience_years": 12}
+{"name": "James Edwards", "title": "Chief Financial Officer", "skills": ["Financial Strategy", "M&A", "Capital Raising", "Leadership"], "Key_Credentials": "MBA", "experience_years": 24}
+{"name": "Landon Stewart", "title": "Senior SRE", "skills": ["GCP", "Observability", "Terraform", "Python"], "Key_Credentials": "Master of Science", "experience_years": 8}
+{"name": "Levi Murphy", "title": "VP of Engineering", "skills": ["Technology Leadership", "Scaling Teams", "Architecture", "Strategy"], "Key_Credentials": "Master of Science", "experience_years": 21}
+{"name": "Logan Cook", "title": "Junior Frontend Developer", "skills": ["React", "HTML", "CSS", "JavaScript"], "Key_Credentials": "Bachelor of Science", "experience_years": 2}
+{"name": "Lucas Morgan", "title": "Senior Cloud Engineer", "skills": ["AWS", "Terraform", "CI/CD", "Kubernetes"], "Key_Credentials": "Bachelor of Science", "experience_years": 7}
+{"name": "Luke Bell", "title": "Data Architect", "skills": ["Data Modeling", "ETL", "Data Warehousing", "Big Data"], "Key_Credentials": "Master of Science", "experience_years": 15}
+{"name": "Mason Rivera", "title": "Senior QA Automation Engineer", "skills": ["Cypress", "Selenium", "JavaScript", "API Automation"], "Key_Credentials": "Bachelor of Science", "experience_years": 8}
+{"name": "Matthew Bailey", "title": "Principal Solutions Architect", "skills": ["Enterprise Architecture", "AWS", "Pre-sales", "Strategy"], "Key_Credentials": "Master of Engineering", "experience_years": 18}
+{"name": "Mia Howard", "title": "Talent Acquisition Lead", "skills": ["Recruiting", "Sourcing", "Employer Branding", "ATS"], "Key_Credentials": "Bachelor of Arts", "experience_years": 9}
+{"name": "Michael Ward", "title": "Senior Network Architect", "skills": ["Network Design", "SD-WAN", "Cloud Networking", "Security"], "Key_Credentials": "Master of Engineering", "experience_years": 16}
+{"name": "Mila Reed", "title": "Senior iOS Developer", "skills": ["Swift", "UIKit", "Architecture", "Performance"], "Key_Credentials": "Bachelor of Computer Science", "experience_years": 7}
+{"name": "Muhammad Cooper", "title": "Lead Android Developer", "skills": ["Kotlin", "Jetpack Compose", "Architecture", "Team Lead"], "Key_Credentials": "Master of Science", "experience_years": 10}
+{"name": "Nova Gray", "title": "Visual Designer", "skills": ["Illustration", "Branding", "Adobe Illustrator", "Graphic Design"], "Key_Credentials": "Bachelor of Fine Arts", "experience_years": 4}
+{"name": "Oliver Henderson", "title": "Senior Business Analyst", "skills": ["Process Improvement", "SQL", "Agile", "Stakeholder Management"], "Key_Credentials": "MBA", "experience_years": 9}
+{"name": "Olivia Coleman", "title": "Chief Operating Officer", "skills": ["Operations Management", "Strategy", "Leadership", "P&L"], "Key_Credentials": "MBA", "experience_years": 23}
+{"name": "Owen Jenkins", "title": "Lead Data Scientist", "skills": ["Machine Learning", "Python", "Team Leadership", "NLP"], "Key_Credentials": "PhD", "experience_years": 13}
+{"name": "Penelope Powell", "title": "Senior DevOps Consultant", "skills": ["Azure DevOps", "Kubernetes", "IaC", "Strategy"], "Key_Credentials": "Master of Engineering", "experience_years": 11}
+{"name": "Ryan Long", "title": "Senior Android Developer", "skills": ["Kotlin", "Android SDK", "Coroutines", "MVVM"], "Key_Credentials": "Bachelor of Science", "experience_years": 8}
+{"name": "Samuel Price", "title": "Director of Data Science", "skills": ["Leadership", "ML Strategy", "Team Building", "Python"], "Key_Credentials": "PhD", "experience_years": 18}
+{"name": "Sebastian Ross", "title": "Senior Embedded Engineer", "skills": ["C++", "Firmware", "RTOS", "Linux"], "Key_Credentials": "Master of Engineering", "experience_years": 9}
+{"name": "Sofia James", "title": "Chief Product Officer", "skills": ["Product Vision", "Executive Leadership", "Market Strategy", "Innovation"], "Key_Credentials": "MBA", "experience_years": 22}
+{"name": "Sophia Washington", "title": "Head of People", "skills": ["HR Strategy", "Organizational Development", "Leadership", "Culture"], "Key_Credentials": "Master of Business", "experience_years": 19}
+{"name": "Victoria Brooks", "title": "Senior Technical Writer", "skills": ["API Documentation", "MadCap Flare", "DITA", "Content Strategy"], "Key_Credentials": "Bachelor of Arts", "experience_years": 8}
+{"name": "William Hughes", "title": "Senior Software Architect", "skills": ["Distributed Systems", "Cloud Architecture", "Go", "Scalability"], "Key_Credentials": "Master of Science", "experience_years": 17}
+{"name": "Wyatt Watson", "title": "Lead Security Engineer", "skills": ["Threat Intelligence", "Incident Response", "Cloud Security", "Team Lead"], "Key_Credentials": "Master of Science", "experience_years": 12}
+{"name": "Zoey Griffin", "title": "Junior UX/UI Designer", "skills": ["Figma", "Wireframing", "Prototyping", "User Research"], "Key_Credentials": "Bachelor of Fine Arts", "experience_years": 2}
+{"name": "Anthony Peterson", "title": "Principal DevOps Engineer", "skills": ["Kubernetes", "GCP", "Site Reliability", "Strategy"], "Key_Credentials": "Master of Engineering", "experience_years": 15}
+{"name": "Aria Diaz", "title": "Associate Product Manager", "skills": ["JIRA", "User Stories", "Market Research", "Agile"], "Key_Credentials": "Bachelor of Business", "experience_years": 2}
+{"name": "Asher Richardson", "title": "Lead Platform Engineer", "skills": ["Kubernetes", "Go", "Platform Engineering", "AWS"], "Key_Credentials": "Master of Science", "experience_years": 11}
+{"name": "Audrey Cox", "title": "General Counsel", "skills": ["Corporate Law", "Compliance", "Litigation", "Leadership"], "Key_Credentials": "Juris Doctor", "experience_years": 20}
+{"name": "Austin Edwards", "title": "Senior Full Stack Developer", "skills": ["Vue.js", "Django", "Python", "JavaScript"], "Key_Credentials": "Bachelor of Science", "experience_years": 7}
+{"name": "Bella Stewart", "title": "People Operations Specialist", "skills": ["HRIS", "Onboarding", "Employee Relations", "Benefits"], "Key_Credentials": "Bachelor of Arts", "experience_years": 4}
+{"name": "Caleb Morris", "title": "IT Security Manager", "skills": ["Cybersecurity Strategy", "Team Leadership", "Incident Management"], "Key_Credentials": "Master of Science", "experience_years": 14}
+{"name": "Charles Nguyen", "title": "Senior Backend Engineer", "skills": ["Python", "FastAPI", "PostgreSQL", "AWS"], "Key_Credentials": "Master of Science", "experience_years": 8}
+{"name": "Claire Murphy", "title": "Head of Talent", "skills": ["Recruitment Strategy", "Leadership", "Employer Branding", "Hiring"], "Key_Credentials": "Master of Business", "experience_years": 16}
+{"name": "Connor Rogers", "title": "Data Visualization Specialist", "skills": ["D3.js", "Tableau", "Looker", "Data Storytelling"], "Key_Credentials": "Bachelor of Science", "experience_years": 5}
+{"name": "Eliana Simmons", "title": "Senior Mobile Engineer", "skills": ["React Native", "TypeScript", "iOS", "Android"], "Key_Credentials": "Bachelor of Computer Science", "experience_years": 7}
+{"name": "Elias Russell", "title": "Chief Executive Officer", "skills": ["Leadership", "Strategy", "Vision", "Fundraising"], "Key_Credentials": "MBA", "experience_years": 28}
+{"name": "Ellie Perry", "title": "Junior Business Analyst", "skills": ["Excel", "SQL", "Requirements Gathering", "Reporting"], "Key_Credentials": "Bachelor of Business", "experience_years": 1}
+{"name": "Emilia Wright", "title": "Senior Product Designer", "skills": ["Design Systems", "Figma", "UX Strategy", "User Research"], "Key_Credentials": "Master of Fine Arts", "experience_years": 9}
+{"name": "Everly Mitchell", "title": "Senior Financial Controller", "skills": ["Accounting", "Financial Reporting", "GAAP", "Auditing"], "Key_Credentials": "CPA", "experience_years": 12}

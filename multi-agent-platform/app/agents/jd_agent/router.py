@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import JSONResponse
-from typing import Dict, Any
+# app/agents/jd_agent/router.py
+
+from fastapi import APIRouter, Depends
 from .schema import JDInput
 from .service import generate_job_description
 
@@ -22,26 +22,11 @@ async def generate_jd(
     
     This endpoint is asynchronous and uses dependency injection for the LLM service.
     """
-    try:
-        jd_json = await generate_job_description(payload, llm_service)
-        
-        # On success, return the data with a status: true field
-        response_data = {"status": True, **jd_json}
-        return response_data
-
-    except HTTPException as e:
-        # If a known error occurs, return a JSON response with status: false
-        return JSONResponse(
-            status_code=e.status_code,
-            content={"status": False, "detail": e.detail}
-        )
-    except Exception:
-        # For any other unexpected errors, return a generic 500 error
-        return JSONResponse(
-            status_code=500,
-            content={"status": False, "detail": "An internal server error occurred."}
-        )
-
+    # We now 'await' the result from the async service function
+    # and pass the injected llm_service instance to it.
+    jd_text = await generate_job_description(payload, llm_service)
+    
+    return {"job_role": payload.job_role, "job_description": jd_text}
 
 @router.get("/health", summary="Health Check")
 def health_check():
