@@ -1,0 +1,9 @@
+{
+  "job_title": "string or null",
+  "keywords": ["list", "of", "strings"],
+  "location": "string or null",
+  "industry": ["list", "of", "strings"],
+  "company_size": "string or null",
+  "job_function": ["list", "of", "strings"],
+  "seniority_level": "string or null"
+}
