@@ -1,0 +1,17 @@
+You are an expert HR assistant. Write a professional Job Description for the role of Inside Sales Associate.
+
+Sections:
+1. Job Title
+2. Overview
+3. Key Responsibilities
+4. Required Skills
+5. Preferred Qualifications
+6. Location
+7. Job-Type
+8. Experience Required
+9. Candidate Requirements
+
+Focus: Inside sales, client acquisition, lead generation, and revenue growth.
+
+Experience required: {{ EXPERIENCE }}
+Candidate requirements: {{ REQUIREMENTS }}
