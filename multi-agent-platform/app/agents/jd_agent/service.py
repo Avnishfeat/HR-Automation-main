@@ -66,7 +66,7 @@ async def generate_job_description(payload: JDInput, llm_service: LLMService) ->
     try:
         template = _load_jd_template(payload.job_role)
         user_input_snippet = payload.as_prompt_snippet()
-
+# giving prompt for llm
         prompt = f"""
 You are a professional HR assistant. Your task is to generate a detailed and structured Job Description.
 Use the provided template and fill in the details based on the user's input.
