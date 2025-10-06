@@ -1,7 +1,7 @@
+# app/agents/jd_agent/service.py
+
 import os
 import logging
-import json
-from typing import Dict, Any
 from fastapi import HTTPException
 
 # The service no longer needs to import the llm_service directly.
@@ -14,7 +14,7 @@ from .schema import JDInput, ROLE_FILE_MAP
 # --- Basic Setup ---
 logger = logging.getLogger("jd_agent")
 
-
+# This helper function does not perform I/O, so it can remain synchronous
 def _load_jd_template(job_role: str) -> str:
     """Loads a JD template file based on the job role."""
     base_dir = os.path.dirname(__file__)
@@ -32,36 +32,10 @@ def _load_jd_template(job_role: str) -> str:
     with open(filepath, "r", encoding="utf-8") as f:
         return f.read()
 
-
-def _parse_llm_output_to_json(llm_output: str) -> Dict[str, Any]:
+# The main function is now async and accepts the llm_service instance
+async def generate_job_description(payload: JDInput, llm_service: LLMService) -> str:
     """
-    Parses the string output from the LLM into a JSON object.
-    Handles potential formatting issues like markdown code blocks.
-    """
-    try:
-        # The LLM might wrap the JSON in a markdown code block (```json ... ```).
-        # We need to strip that before parsing.
-        if llm_output.strip().startswith("```json"):
-            cleaned_output = llm_output.strip()[7:-3].strip()
-        elif llm_output.strip().startswith("```"):
-            cleaned_output = llm_output.strip()[3:-3].strip()
-        else:
-            cleaned_output = llm_output
-
-        # Attempt to parse the cleaned string as JSON
-        return json.loads(cleaned_output)
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse LLM output into JSON. Error: {e}")
-        logger.error(f"Raw LLM output was: {llm_output}")
-        raise HTTPException(
-            status_code=500,
-            detail="The model returned an invalid format. Could not parse the job description.",
-        )
-
-
-async def generate_job_description(payload: JDInput, llm_service: LLMService) -> Dict[str, Any]:
-    """
-    Asynchronously generates a job description and returns it as a JSON object(test).
+    Asynchronously generates a job description by using the central LLM service.
     """
     try:
         template = _load_jd_template(payload.job_role)
@@ -71,45 +45,22 @@ async def generate_job_description(payload: JDInput, llm_service: LLMService) ->
 You are a professional HR assistant. Your task is to generate a detailed and structured Job Description.
 Use the provided template and fill in the details based on the user's input.
 
-*Important: Do not include any introductory phrases, conversational text, or markdown formatting like ```json.
-Your output must be a raw JSON string that adheres strictly to the specified schema.*
+*Important: Do not include any introductory phrases, conversational text, or code block formatting. Start the output directly with the job description.*
 
 
 **Job Role:** {payload.job_role}
-
-**Template for reference:**
+**Template:**
 ---
 {template}
 ---
-
 **User Input:**
 {user_input_snippet}
----
-
-
-FOLLOW THIS RESPONSE JSON STRUCTURE ALWAYS. OUTPUT ONLY THE JSON OBJECT.
-{{
-  "required_skills": "string",
-  "preferred_skills": "string",
-  "minimum_qualification": "string",
-  "languages": "string",
-  "overview": "string",
-  "key_responsibilities": "string",
-  "key_skills_and_qualifications": "string",
-  "desired_attributes": "string",
-  "benefits": "string"
-}}
 """
         # We 'await' the result from the now-async llm_service method
         generated_text = await llm_service.generate_text(prompt)
-        
-        # Parse the generated text to ensure it's valid JSON
-        parsed_json = _parse_llm_output_to_json(generated_text)
-        
-        return parsed_json
+        return generated_text
         
     except HTTPException as e:
-        # Re-raise known HTTP exceptions
         raise e
     except Exception as e:
         logger.error(f"An unexpected error occurred in the JD agent: {e}")
