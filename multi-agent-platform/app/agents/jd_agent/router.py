@@ -45,5 +45,5 @@ async def generate_jd(
 
 @router.get("/health", summary="Health Check")
 def health_check():
-    """Returns a simple status to confirm the agent is running."""
+    """Returns a simple Status to confirm the agent is running."""
     return {"status": "ok", "agent": "JD Agent"}
