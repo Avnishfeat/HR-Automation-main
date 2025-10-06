@@ -3,5 +3,6 @@
   "location": "string or null",
   "job_type": "string (e.g., 'Full-time', 'Contract', 'Internship') or null",
   "experience_level": "string (e.g., 'Entry Level', 'Mid Level', 'Senior') or null",
+  "salary_estimate": "string (e.g., '₹8,00,000 - ₹12,00,000 per year') or null",
   "company_name": "string or null"
 }
