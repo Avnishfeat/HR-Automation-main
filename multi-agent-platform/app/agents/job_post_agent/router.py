@@ -16,6 +16,15 @@ async def generate_job_post(
             platform=request.platform,
             job_description=request.job_description
         )
-        return {"platform": request.platform, "generated_post": result["result"]}
+        
+        return {
+            "status": True,
+            "platform": request.platform,
+            "generated_post": result["result"]
+        }
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500, 
+            detail={"status": False, "error": str(e)}
+        )
