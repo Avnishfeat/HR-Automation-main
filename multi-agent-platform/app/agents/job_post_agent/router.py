@@ -1,5 +1,3 @@
-# app/agents/job_post_agent/router.py
-
 from fastapi import APIRouter, Depends, HTTPException
 from .schemas import JobPostRequest
 from .service import JobPostAgentService
