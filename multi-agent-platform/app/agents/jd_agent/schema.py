@@ -1,7 +1,6 @@
 # app/agents/jd_agent/schema.py
 
-from typing import Optional, List
-# Import field_validator for the modern Pydantic V2 approach
+from typing import List
 from pydantic import BaseModel, Field, field_validator
 
 # ✅ Single source of truth for all supported job roles.
@@ -50,15 +49,16 @@ ROLE_FILE_MAP = {
     "Business Development Manager": "Business_Development_Manager.txt",
 }
 
-# ✅ Dynamically create allowed roles from the map
 ALLOWED_ROLES: List[str] = list(ROLE_FILE_MAP.keys())
 
 
 class JDInput(BaseModel):
     """Pydantic model for Job Description generation input."""
     job_role: str = Field(..., description="The job role, must be one of the allowed roles.")
-    experience: Optional[str] = Field(None, example="3-5 years", description="Required experience level.")
-    requirements: Optional[str] = Field(None, example="SQL, Python, Power BI", description="Key skills and requirements.")
+    
+    experience: str = Field(..., example="3-5 years", description="Required experience level.")
+    
+    requirements: str = Field(..., example="SQL, Python, Power BI", description="Key skills and requirements.")
 
     # ✅ Validation to ensure job_role is in ALLOWED_ROLES
     @field_validator("job_role")
@@ -73,7 +73,7 @@ class JDInput(BaseModel):
     
     def as_prompt_snippet(self) -> str:
         """Helper to format the experience and requirements for LLM prompt."""
-        return f"Experience: {self.experience or 'Not specified'}\nRequirements: {self.requirements or 'Not specified'}"
+        return f"Experience: {self.experience}\nRequirements: {self.requirements}"
 
     class Config:
         str_strip_whitespace = True 

@@ -24,6 +24,7 @@ from app.agents.criteria_agent.router import router as criteria_router
 from app.agents.job_post_agent.router import router as job_post_agent_router
 from app.agents.talent_matcher.router import router as talent_matcher_router
 from app.agents.question_generator.router import router as question_generator_router
+from app.agents.resume_score_agent.router import router as resume_agent_router
 
 # Setup logging
 logging.basicConfig(
@@ -72,6 +73,7 @@ app.include_router(criteria_router, prefix="/api/v1/criteria", tags=["Candidate 
 app.include_router(job_post_agent_router,prefix="/api/v1", tags=["Job Post Agent"])
 app.include_router(talent_matcher_router,prefix="/api/v1/talent_matcher", tags=["Talent Matcher Agent"])
 app.include_router(question_generator_router,prefix="/api/v1/question_generator", tags=["Question Generator Agent"])
+app.include_router(resume_agent_router, prefix="/api/v1/resume", tags=["Resume Analysis Agent"])
 
 @app.get("/")
 async def root():

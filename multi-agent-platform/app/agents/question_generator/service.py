@@ -28,10 +28,13 @@ class QuestionGenerationService:
         **Instructions**:
         1.  Thoroughly analyze the content of the attached resume file.
         2.  Compare the candidate's experience, skills, and education from the file against the job description and requirements.
-        3.  Generate exactly 10 questions that probe their qualifications and identify any potential gaps.
+        3.  Generate a total of **exactly 12 questions** based on the following criteria:
+            * **2 Generalized Questions**: Broad, role-related questions that could be asked to any candidate (e.g., about teamwork, career goals, or motivation for applying).
+            * **10 Resume-Specific Questions**: Questions that directly probe the candidate's qualifications, skills, and experience listed on their resume, especially identifying any potential gaps when compared to the job requirements.
+        4.  **Crucial Constraint**: Ensure that no two questions are repetitive or cover the exact same topic. Each question must be distinct.
 
         **Output Format**:
-        You MUST provide the output as a single, valid JSON array of strings.
+        You MUST provide the output as a single, valid JSON array of 12 strings.
         """
         
         # Pass the prompt and the file object to the LLM service

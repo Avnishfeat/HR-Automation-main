@@ -49,35 +49,6 @@ async def generate_jd(
             content={"status": False, "detail": "An internal server error occurred."}
         )
 
-
-@router.post("/generate-flat", summary="Generate JD (Flat Structure)")
-async def generate_jd_flat(
-    payload: JDInput,
-    llm_service: LLMService = Depends(get_llm_service)
-):
-    """
-    Alternative endpoint that returns flat structure (original format).
-    Use /generate for Talent Matcher compatibility.
-    """
-    try:
-        jd_json = await generate_job_description(payload, llm_service)
-        
-        # Flat structure: all fields at root level
-        response_data = {"status": True, **jd_json}
-        return response_data
-
-    except HTTPException as e:
-        return JSONResponse(
-            status_code=e.status_code,
-            content={"status": False, "detail": e.detail}
-        )
-    except Exception:
-        return JSONResponse(
-            status_code=500,
-            content={"status": False, "detail": "An internal server error occurred."}
-        )
-
-
 @router.get("/health", summary="Health Check")
 def health_check():
     """Returns a simple status to confirm the agent is running."""
