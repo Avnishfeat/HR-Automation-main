@@ -120,3 +120,8 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+captured_frames/
+data/
+chrome_profile/
+uploads/

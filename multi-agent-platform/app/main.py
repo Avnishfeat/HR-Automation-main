@@ -24,6 +24,8 @@ from app.agents.criteria_agent.router import router as criteria_router
 from app.agents.job_post_agent.router import router as job_post_agent_router
 from app.agents.talent_matcher.router import router as talent_matcher_router
 from app.agents.question_generator.router import router as question_generator_router
+from app.agents.interview_agent.api.router import router as interview_router
+from app.agents.interview_agent.service_container import initialize_interview_services
 
 # Setup logging
 logging.basicConfig(
@@ -39,6 +41,13 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("🚀 Starting Multi-Agent Platform...")
     await DatabaseService.connect_db(settings.MONGODB_URL)
+    
+    # Initialize Interview Services
+    try:
+        initialize_interview_services()
+        logger.info("✅ Interview Services initialized")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize Interview Services: {e}")
     logger.info("✅ Application started successfully")
     
     yield
@@ -72,6 +81,7 @@ app.include_router(criteria_router, prefix="/api/v1/criteria", tags=["Candidate 
 app.include_router(job_post_agent_router,prefix="/api/v1", tags=["Job Post Agent"])
 app.include_router(talent_matcher_router,prefix="/api/v1/talent_matcher", tags=["Talent Matcher Agent"])
 app.include_router(question_generator_router,prefix="/api/v1/question_generator", tags=["Question Generator Agent"])
+app.include_router(interview_router, prefix="/api/v1/interview", tags=["Interview Agent"])
 
 @app.get("/")
 async def root():
