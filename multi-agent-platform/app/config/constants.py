@@ -1,7 +1,7 @@
 # app/config/constants.py
 # Re-export constants from interview utils for backward compatibility
 
-from app.agents.interview_agent.utils.constants import (
+from app.agents.interview.config.constants import (
     AudioConfig,
     InterviewTiming,
     VideoConfig,

@@ -24,8 +24,8 @@ from app.agents.criteria_agent.router import router as criteria_router
 from app.agents.job_post_agent.router import router as job_post_agent_router
 from app.agents.talent_matcher.router import router as talent_matcher_router
 from app.agents.question_generator.router import router as question_generator_router
-from app.agents.interview_agent.api.router import router as interview_router
-from app.agents.interview_agent.service_container import initialize_interview_services
+from app.agents.interview.api.interview import router as interview_router
+from app.agents.interview.core.startup import initialize_services as initialize_interview_services
 
 # Setup logging
 logging.basicConfig(
