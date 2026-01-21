@@ -1,96 +1,145 @@
-Generate an api from gemini from this website https://aistudio.google.com
+# AI Recruitment Agent Suite
 
-after generating api create a file name .env and paste the api in this format
-#GEMINI_API_KEY="Your API Key"
-make sure you dont share your api key with any one
+A FastAPI-powered backend utilizing the Gemini API to automate Job Description (JD) generation, talent matching, screening criteria, and platform-specific job postings.
 
-create your virtual environment using this command
+## Prerequisites
+
+1. **Get Gemini API Key:**
+* Visit [Google AI Studio](https://aistudio.google.com).
+* Generate your API key.
+
+
+2. **Install Postman:**
+* Download and install from [Postman.com](https://www.postman.com/).
+
+
+
+## Setup Instructions
+
+### 1. Environment Configuration
+
+Create a file named `.env` in the root directory and paste your API key:
+
+```env
+# .env file
+GEMINI_API_KEY="Your_API_Key_Here"
+
+```
+
+> **Security Note:** Do not share your API key or commit your `.env` file to public repositories.
+
+### 2. Virtual Environment Setup
+
+Run the following commands in your terminal to isolate your dependencies:
+
+```bash
+# Create the environment
 python -m venv venv
 
-and activat the enironment using this command
+# Activate the environment (Windows)
 .\venv\Scripts\Activate.ps1
-or 
-.'venv\Scripts\activate
+# OR
+.\venv\Scripts\activate
 
-install required libraries using requirement.txt  file
-pip install -r requirements,txt
+```
 
-and run this command in terminal
+### 3. Installation & Launch
+
+```bash
+# Install required libraries
+pip install -r requirements.txt
+
+# Start the Uvicorn server
 uvicorn app.main:app --reload
 
-after starting uvicorn server you will get the port address paste the address in the cutl code 
-example"http://127.0.0.1:8000"
+```
 
-1. Download Postman application from their website https://www.postman.com/
-2. Setup Postman
-3. select code snippet and paste the curl code and send the request
+Once started, note the address (usually `http://127.0.0.1:8000`).
 
-if the port is different then change it
+---
 
-for job_description agent:-
+## API Endpoints & Testing
 
+### 1. Job Description Agent
+
+**Endpoint:** `POST /api/v1/jd/generate`
+
+```bash
 curl -X POST 'http://127.0.0.1:8000/api/v1/jd/generate' \
 -H "Content-Type: application/json" \
 -d '{
-   "job_role": "your job role",
-  "experience": "experience in years",
-  "requirements": "skill requirements"
+   "job_role": "Data Analyst",
+   "experience": "3+ years",
+   "requirements": "SQL, Python, Power BI"
 }'
 
-example:{
-  "job_role": "Data Analyst",
-  "experience": "3+ years",
-  "requirements": "SQL, Python, Power BI"
-}
+```
 
-for talent_matcher agent:
+### 2. Talent Matcher Agent
 
-curl --location 'http://localhost:8000/api/v1/talent_matcher/match-job' \
+**Endpoint:** `POST /api/v1/talent_matcher/match-job`
+
+```bash
+curl --location 'http://127.0.0.1:8000/api/v1/talent_matcher/match-job' \
 --header 'Content-Type: application/json' \
 --data '{
-  "job_description": "your job description",
-  "required_degree": "degree",
-  "min_years_experience": "experience in years"
+  "job_role": "your job role",
+    "job_description": "your job description",
+      "required_skills": "required skills",
+      "preferred_skills": "preferred skills",
+      "minimum_qualification": "minimum qualification",
+      "languages": "languages",
+      "overview": "overview",
+      "key_responsibilities": "key responsibilities",
+      "key_skills_and_qualifications": "key skills and qualifications",
+      "desired_attributes": "desired attributes",
+      "benefits": "benefits"
+  }
 }'
-"""
-example:
-{
-  "job_description": "Seeking a senior data scientist with a strong background in statistical analysis and building machine learning models using Python, Pandas, and Scikit-learn.",
-  "required_degree": "PhD",
-  "min_years_experience": 10
-}
-"""
 
-for criteria_agent:
+```
 
+### 3. Criteria Agent
+
+Generates screening questions for specific platforms.
+*Supports: `linkedin`, `indeed`, `naukri`, or `all`.*
+
+**Endpoint:** `POST /api/v1/criteria/generate`
+
+```bash
 curl --location 'http://127.0.0.1:8000/api/v1/criteria/generate' \
 --header 'Content-Type: application/json' \
 --data '{
-  "jd_text": "your job description",
-  "target": "applications like linkedin"
+  "jd_text": "Hiring a Senior Data Analyst in Mumbai. 5+ years experience with SQL, Python.",
+  "target": "linkedin"
 }'
-"""
-example:
-{
-  "jd_text": "We are hiring a Senior Data Analyst in Mumbai. The ideal candidate has 5+ years of experience with SQL, Python, and Power BI. Responsibilities include creating dashboards and performing statistical analysis.",
-  "target": "all"
-}
-"""
-# its only of linkedin, indeed, and naukri
 
-for job_post_agent:
+```
 
+### 4. Job Post Agent
+
+Formats JDs for social/professional platform posting.
+*Supports: `LinkedIn`, `Indeed`, `Naukri`.*
+
+**Endpoint:** `POST /api/v1/job-post-agent/generate`
+
+```bash
 curl --location 'http://127.0.0.1:8000/api/v1/job-post-agent/generate' \
 --header 'Content-Type: application/json' \
 --data '{
-  "job_description": "your job description",
-  "platform": "application name"
-}'
-"""
-example:
-{
-  "job_description": "We are seeking a Senior Python Developer to join our backend team. The successful candidate will be responsible for designing, building, and maintaining scalable server-side applications and APIs. Key responsibilities include writing clean, efficient code using frameworks like Django or FastAPI, managing database schemas in PostgreSQL, and deploying services on cloud platforms like AWS. Requires 5+ years of professional Python experience and strong problem-solving skills.",
+  "job_description": "We are seeking a Senior Python Developer... 5+ years experience.",
   "platform": "Indeed"
-}
-"""
-# its only of linkedin, indeed, and naukri
+}'
+
+```
+
+---
+
+## Testing with Postman
+
+1. Open **Postman**.
+2. Click **Import** and paste the `curl` code from above.
+3. Ensure the URL matches your local port (`8000` by default).
+4. Click **Send** to view the AI-generated response.
+
+---
