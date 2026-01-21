@@ -17,7 +17,7 @@ from app.agents.interview.infrastructure.selenium.meet_session_manager import Me
 from app.agents.interview.orchestrator.meet_interview_orchestrator import MeetInterviewOrchestrator
 from app.agents.interview.services.audio.stt_service import STTService
 from app.agents.interview.services.audio.tts_service import TTSService
-from app.agents.interview.core.exceptions import ServiceInitializationError
+from app.core.exceptions import ServiceInitializationError
 from app.agents.interview.core.error_handlers import register_error_handlers
 from app.agents.interview.core.middleware import register_middleware
 from app.agents.interview.core.limiter import limiter, init_concurrency_limiter

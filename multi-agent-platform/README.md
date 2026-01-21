@@ -2,7 +2,7 @@
 
 A modular FastAPI platform for managing multiple AI agents with support for various LLMs, databases, and WebSockets.
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### 1. Clone the repository
 ```bash

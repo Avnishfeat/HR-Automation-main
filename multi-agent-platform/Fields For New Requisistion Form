@@ -1,0 +1,84 @@
+[
+    { "typ": "Section",
+        "label": "Requester/Recruiter Details",
+        "children": [
+            { "typ": "TableLayout",
+                "columns": 5,
+                "children": [
+                    { "typ": "field", "field_id": "employee_id", "label": "Requester ID", "default_value": "{{USER_ID}}", "rule_id": "emp_form_lookup_rule", "required": true },
+                    { "typ": "field", "field_id": "employee_name", "label": "Requester Name", "colSpan": 2, "rule_id": "emp_form_lookup_rule" },
+                    { "typ": "field", "field_id": "employee_email_id", "label": "Requester Email", "colSpan": 2 }
+                ]
+            },
+            { "typ": "TableLayout",
+                "columns": 5,
+                "children": [
+                    { "typ": "field", "field_id": "reports_to_id", "label": "Reporting Manager Code", "rule_id": "reports_to_lookup_rule", "required": true },
+                    { "typ": "field", "field_id": "reports_to_name", "label": "Reporting Manager Name", "colSpan": 2 },
+                    { "typ": "field", "field_id": "reports_to_email", "label": "Reporting Manager Email", "colSpan": 2 }
+                ]
+            }
+        ]
+    },
+    { "typ": "Section",
+        "label": "Basic Job Details",
+        "children": [
+            { "typ": "TableLayout",
+                "columns": 4,
+                "mobile_columns": 2,
+                "children": [
+                    { "typ": "field", "field_id": "job_code", "label": "Job Code (auto-gen)", "rule_id": "jobs_template_auto_fill" },
+                    { "typ": "field", "field_id": "job_title", "colSpan": 2, "required": true },
+                    { "typ": "field", "field_id": "no_of_positions", "required": true },
+                    { "typ": "field", "field_id": "oprations", "default_value": "INSERT", "hidden": true, "required": true }
+                ]
+            },
+            { "typ": "TableLayout",
+                "columns": 4,
+                "mobile_columns": 2,
+                "children": [
+                    { "typ": "field", "field_id": "department", "required": true },
+                    { "typ": "field", "field_id": "job_type", "required": true },
+                    { "typ": "field", "field_id": "work_location", "required": true },
+                    { "typ": "field", "field_id": "jd_shift", "label": "Shift/Timing", "required": true }
+                ]
+            },
+            { "typ": "TableLayout",
+                "columns": 4,
+                "mobile_columns": 2,
+                "children": [
+                    { "typ": "field", "field_id": "total_budget", "required": true },
+                    { "typ": "field", "field_id": "postion_open_date", "label": "Position Open Date", "required": true },
+                    { "typ": "field", "field_id": "positionclosedate", "label": "Position Close Date", "required": true },
+                    { "typ": "field", "field_id": "jd_validity_period", "required": true }
+                ]
+            },
+            { "typ": "TableLayout",
+                "children": [
+                    { "typ": "field", "field_id": "experience_range", "label": "Experience Range (Years)", "required": true },
+                    { "typ": "field", "field_id": "salary_range", "label": "Salary Range (Lakhs)", "required": true },
+                    { "typ": "field", "field_id": "joining_timeline", "required": true },
+                    { "typ": "field", "field_id": "travel_requirement", "required": true }
+                ]
+            }
+        ]
+    },
+    { "typ": "Section",
+        "label": "Role Description",
+        "children": [
+            { "typ": "TableLayout",
+                "children": [
+                    { "typ": "field", "field_id": "required_skills", "required": true },
+                    { "typ": "field", "field_id": "preferred_skills", "required": true },
+                    { "typ": "field", "field_id": "minimum_qualifications", "required": true },
+                    { "typ": "field", "field_id": "languages", "required": true },
+                    { "typ": "field", "field_id": "overview", "colSpan": 2, "required": true },
+                    { "typ": "field", "field_id": "key_responsibilities", "label": "Key Responsibilities", "colSpan": 2, "required": true },
+                    { "typ": "field", "field_id": "benefits", "colSpan": 2, "required": true },
+                    { "typ": "field", "field_id": "desired_attributes", "colSpan": 2, "required": true },
+                    { "typ": "field", "field_id": "key_skills_and_qualifications", "colSpan": 2, "required": true }
+                ]
+            }
+        ]
+    }
+]

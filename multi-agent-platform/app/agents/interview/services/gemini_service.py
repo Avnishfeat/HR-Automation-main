@@ -12,7 +12,7 @@ from google.genai import types
 
 from app.agents.interview.core.ports.session_repository import SessionRepository
 from app.agents.interview.core.retry_handler import retry_on_failure
-from app.agents.interview.core.exceptions import (
+from app.core.exceptions import (
     ExternalServiceError, 
     ServiceInitializationError,
     InterviewBotException

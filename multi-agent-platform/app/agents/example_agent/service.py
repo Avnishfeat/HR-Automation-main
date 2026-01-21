@@ -49,7 +49,7 @@ class ExampleAgentService:
                 "provider": provider
             })
             
-            logger.info(f"✅ Processed query: {query[:50]}...")
+            logger.info(f" Processed query: {query[:50]}...")
             
             return {
                 "result": response,

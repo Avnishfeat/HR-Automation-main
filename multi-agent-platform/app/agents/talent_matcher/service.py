@@ -25,7 +25,7 @@ class TalentMatcherService:
 
         # 3. Pre-compute all employee embeddings in a single batch operation (very fast)
         self.employee_embeddings = self.model.encode(all_profile_texts, show_progress_bar=False)
-        print("✅ Employee profiles pre-computed successfully.")
+        print(" Employee profiles pre-computed successfully.")
 
     def _extract_degree_from_jd(self, job_description) -> str:
         """
@@ -91,7 +91,7 @@ class TalentMatcherService:
         required_degree = request.required_degree or self._extract_degree_from_jd(request.job_description)
         min_experience = request.min_years_experience if request.min_years_experience is not None else self._extract_experience_from_jd(request.job_description)
         
-        print(f"📋 Matching criteria: Degree={required_degree}, Experience={min_experience}+ years")
+        print(f" Matching criteria: Degree={required_degree}, Experience={min_experience}+ years")
         
         # STEP 1: Filter by degree and experience first
         filtered_indices = [
@@ -130,7 +130,7 @@ class TalentMatcherService:
 
         # STEP 5: Sort by score and return the top 5
         results.sort(key=lambda x: x["score"], reverse=True)
-        print(f"✅ Found {len(results)} matches, returning top 5")
+        print(f" Found {len(results)} matches, returning top 5")
         return results[:5]
 
     def _extract_reasons(self, jd: str, profile: str, job_description):

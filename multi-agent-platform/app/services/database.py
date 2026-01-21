@@ -13,7 +13,7 @@ class DatabaseService:
         try:
             cls.client = AsyncIOMotorClient(mongodb_url)
             await cls.client.admin.command('ping')
-            logger.info("✅ Connected to MongoDB")
+            logger.info(" Connected to MongoDB")
         except Exception as e:
             logger.error(f"❌ MongoDB connection failed: {e}")
             raise

@@ -13,7 +13,7 @@ from app.agents.interview.config.constants import BrowserConfig, InterviewTiming
 from .actions.chat_actions import ChatActions
 from .actions.media_actions import MediaActions
 from .actions.video_capture import VideoCapture
-from .actions.participant_tracker import ParticipantTracker  # ✅ CORRECT IMPORT
+from .actions.participant_tracker import ParticipantTracker  #  CORRECT IMPORT
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ class MeetController:
         self.chat: Optional[ChatActions] = None
         self.media: Optional[MediaActions] = None
         self.video: Optional[VideoCapture] = None
-        self.participants: Optional[ParticipantTracker] = None  # ✅ CORRECT TYPE
+        self.participants: Optional[ParticipantTracker] = None  #  CORRECT TYPE
 
 
     def setup_driver(self) -> bool:
@@ -102,7 +102,7 @@ class MeetController:
             self.chat = ChatActions(self.driver)
             self.media = MediaActions(self.driver)
             self.video = VideoCapture(self.driver)
-            self.participants = ParticipantTracker(self.driver)  # ✅ CORRECT - only needs driver
+            self.participants = ParticipantTracker(self.driver)  #  CORRECT - only needs driver
 
             logger.info("Chrome driver created successfully")
 

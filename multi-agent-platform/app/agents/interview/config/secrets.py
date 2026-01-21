@@ -162,9 +162,24 @@ class SecretsManager:
     
     def _load_secret(self, name: str) -> Optional[str]:
         """Load a secret from the configured backend."""
+        # PRIORITIZE: Global App Settings (Single Source of Truth)
+        try:
+            from app.core.config import settings
+            if hasattr(settings, name):
+                val = getattr(settings, name)
+                # Only return if it's a valid value (not None or empty string if that's considered unset)
+                if val is not None:
+                    return str(val)
+        except ImportError:
+            # This might happen during standalone testing of the agent
+            pass
+        except Exception as e:
+            logger.warning(f"Failed to load '{name}' from global settings: {e}")
+
+        # FALLBACK: Environment Variable
         if self._backend == SecretBackend.ENVIRONMENT:
             return os.getenv(name)
-        # Future: Add other backends here
+        
         return None
     
     def validate_all(self) -> tuple[bool, List[str]]:

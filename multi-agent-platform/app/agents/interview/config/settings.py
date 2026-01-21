@@ -36,12 +36,12 @@ class Config:
     # Secrets - accessed via SecretsManager (never stored as class attributes)
     @classmethod
     def get_gemini_api_key(cls) -> Optional[str]:
-        """Get Gemini API key from secrets manager."""
+        """Get Gemini API key from secrets manager (proxied from Global Settings)."""
         return secrets.get("GEMINI_API_KEY")
     
     @classmethod
     def get_mongodb_url(cls) -> Optional[str]:
-        """Get MongoDB URL from secrets manager."""
+        """Get MongoDB URL from secrets manager (proxied from Global Settings)."""
         return secrets.get("MONGODB_URL")
     
     @classmethod

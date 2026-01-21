@@ -1,9 +1,10 @@
-# app/core/log_config.py
+# app/core/logging.py
 import logging.config
 import logging
 import os
 import re
 from pathlib import Path
+from typing import List
 
 # Create a 'logs' directory at the project root if it doesn't exist
 log_dir = Path(__file__).resolve().parents[2] / 'logs'
@@ -27,10 +28,25 @@ class SecretsFilter(logging.Filter):
             return
         
         try:
-            from app.config.secrets import secrets
+            # Import global settings via helper to avoid direct complexity
+            from app.core.config import settings
             
-            # Get all secret values for masking
-            secret_values = secrets.get_all_values_for_masking()
+            secret_values = []
+            
+            # Explicitly list keys we want to mask
+            keys_to_mask = [
+                "GEMINI_API_KEY",
+                "OPENAI_API_KEY",
+                "MONGODB_URL"
+            ]
+            
+            for key in keys_to_mask:
+                if hasattr(settings, key):
+                   val = getattr(settings, key)
+                   if val:
+                       secret_values.append(str(val))
+
+            # Also mask anything that looks like a key if needed, or rely on explicit list
             
             for value in secret_values:
                 if value and len(value) > 4:
@@ -40,8 +56,11 @@ class SecretsFilter(logging.Filter):
             
             self._initialized = True
         except ImportError:
-            # Secrets module not yet loaded, will retry next time
+            # Config module not yet loaded, will retry next time
             pass
+        except Exception as e:
+            # Fallback to prevent logging failure
+            print(f"Warning: Failed to initialize SecretsFilter: {e}")
     
     def filter(self, record: logging.LogRecord) -> bool:
         """Mask any secret values in the log message."""
@@ -57,10 +76,14 @@ class SecretsFilter(logging.Filter):
         if self._patterns and record.args:
             new_args = []
             for arg in record.args:
-                arg_str = str(arg)
-                for pattern in self._patterns:
-                    arg_str = pattern.sub("[REDACTED]", arg_str)
-                new_args.append(arg_str)
+                if isinstance(arg, str):
+                   arg_str = arg
+                   for pattern in self._patterns:
+                       arg_str = pattern.sub("[REDACTED]", arg_str)
+                   new_args.append(arg_str)
+                else:
+                   # Preserve original type (int, float, etc.) to valid logging formatting
+                   new_args.append(arg)
             record.args = tuple(new_args)
         
         return True  # Always allow the record (after masking)
@@ -110,7 +133,7 @@ LOGGING_CONFIG = {
         },
     },
     'loggers': {
-        # Suppress noisy libav errors (video decoding issues are common and non-critical)
+        # Suppress noisy libav errors
         'libav.libvpx': {
             'level': 'CRITICAL',
             'handlers': ['console'],
@@ -121,9 +144,18 @@ LOGGING_CONFIG = {
             'handlers': ['console'],
             'propagate': False,
         },
-        # Suppress streamlit_webrtc shutdown errors (harmless event loop warnings)
         'streamlit_webrtc.shutdown': {
             'level': 'CRITICAL',
+            'handlers': ['console'],
+            'propagate': False,
+        },
+        'httpx': {
+            'level': 'WARNING',
+            'handlers': ['console'],
+            'propagate': False,
+        },
+        'httpcore': {
+            'level': 'WARNING',
             'handlers': ['console'],
             'propagate': False,
         },

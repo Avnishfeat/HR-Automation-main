@@ -7,7 +7,7 @@ from typing import Optional
 import concurrent.futures
 
 from app.agents.interview.core.startup import get_services
-from app.agents.interview.core.exceptions import (ServiceInitializationError, MeetConnectionError, InterviewExecutionError)
+from app.core.exceptions import (ServiceInitializationError, MeetConnectionError, InterviewExecutionError)
 from app.agents.interview.models.analysis_schemas import CombinedAnalysisReport
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ def start_and_conduct_interview_task(
         # 1. Start Bot
         success = meet_session_mgr.start_bot_session(
             session_id, meet_link, candidate_id, audio_device,
-            enable_video, False, video_capture_method
+            enable_video, True, video_capture_method
         )
         if not success:
             db_handler.update_session_status(session_id, "error_join_failed")

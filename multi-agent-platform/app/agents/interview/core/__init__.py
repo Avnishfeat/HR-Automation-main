@@ -2,7 +2,7 @@
 """
 Core utilities and error handling for the interview bot.
 """
-from .exceptions import (
+from app.core.exceptions import (
     InterviewBotException,
     ServiceInitializationError,
     SessionError,

@@ -48,16 +48,33 @@ for talent_matcher agent:
 curl --location 'http://localhost:8000/api/v1/talent_matcher/match-job' \
 --header 'Content-Type: application/json' \
 --data '{
-  "job_description": "your job description",
-  "required_degree": "degree",
-  "min_years_experience": "experience in years"
+  "job_role": "your job role",
+    "job_description": "your job description",
+      "required_skills": "required skills",
+      "preferred_skills": "preferred skills",
+      "minimum_qualification": "minimum qualification",
+      "languages": "languages",
+      "overview": "overview",
+      "key_responsibilities": "key responsibilities",
+      "key_skills_and_qualifications": "key skills and qualifications",
+      "desired_attributes": "desired attributes",
+      "benefits": "benefits"
 }'
 """
 example:
 {
-  "job_description": "Seeking a senior data scientist with a strong background in statistical analysis and building machine learning models using Python, Pandas, and Scikit-learn.",
-  "required_degree": "PhD",
-  "min_years_experience": 10
+  "job_role": "Data Analyst",
+    "job_description": {
+        "required_skills": "Proficiency in SQL for data extraction, manipulation, and optimization. Strong programming skills in Python for data analysis, scripting, and automation. Expertise in Power BI for developing and maintaining interactive dashboards, reports, and data visualizations. Solid understanding of data modeling, data warehousing concepts, and ETL processes.",
+        "preferred_skills": "Experience with other data visualization tools such as Tableau or Qlik Sense. Knowledge of statistical analysis, machine learning concepts, and predictive modeling techniques. Familiarity with cloud data platforms (e.g., AWS, Azure, GCP) and big data technologies. Experience with version control systems like Git.",
+        "minimum_qualification": "Bachelor's degree in Computer Science, Statistics, Mathematics, Economics, Business Analytics, or a related quantitative field. A minimum of 3 years of professional experience in a data analyst, business intelligence analyst, or similar role.",
+        "languages": "English (Fluent)",
+        "overview": "We are seeking a highly skilled and experienced Data Analyst with 3+ years of experience to join our dynamic team. The ideal candidate will be instrumental in transforming complex datasets into actionable business insights through robust data visualization and comprehensive reporting, directly supporting strategic decision-making and operational improvements across the organization.",
+        "key_responsibilities": "Develop, design, and maintain interactive dashboards and reports using Power BI to visualize key performance indicators, trends, and business metrics. Extract, transform, and load (ETL) data from various databases and data sources using SQL and Python, ensuring data accuracy, consistency, and integrity. Conduct in-depth data analysis to identify patterns, anomalies, root causes, and opportunities for business optimization and growth. Collaborate closely with stakeholders across different departments to understand business requirements and translate them into effective data solutions and analytical deliverables. Present findings, insights, and strategic recommendations to both technical and non-technical audiences clearly and concisely. Contribute to the continuous improvement of data analysis methodologies, tools, and best practices.",
+        "key_skills_and_qualifications": "Proven ability to analyze large, complex datasets and translate raw data into clear, concise, and actionable insights. Excellent analytical, problem-solving, and critical thinking skills with a strong attention to detail. Exceptional communication and presentation skills, with the capability to articulate technical information to diverse audiences effectively. Demonstrated experience in creating compelling and user-friendly data visualizations and comprehensive analytical reports. A minimum of 3 years of hands-on professional experience as a Data Analyst, focusing on business intelligence and reporting.",
+        "desired_attributes": "A proactive, self-motivated individual with a strong business acumen and a passion for leveraging data to drive decision-making. Ability to work both independently and collaboratively within a fast-paced, evolving environment. Intellectual curiosity, a commitment to continuous learning, and adaptability to new technologies and methodologies.",
+        "benefits": "Competitive salary, comprehensive health, dental, and vision insurance plans, paid time off, 401(k) retirement savings plan with company match, professional development opportunities, and a collaborative and innovative work environment."
+        }
 }
 """
 

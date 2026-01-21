@@ -86,19 +86,54 @@ Your output must be a raw JSON string that adheres strictly to the specified sch
 {user_input_snippet}
 ---
 
-FOLLOW THIS RESPONSE JSON STRUCTURE ALWAYS. OUTPUT ONLY THE JSON OBJECT.
-{{
-  "required_skills": "string",
-  "preferred_skills": "string",
-  "minimum_qualification": "string",
-  "languages": "string",
-  "overview": "string",
-  "key_responsibilities": "string",
-  "key_skills_and_qualifications": "string",
-  "desired_attributes": "string",
-  "benefits": "string"
-}}
-"""
+        **Instructions for Missing Values:**
+        - Use the provided user input to fill the fields.
+        - If a value is NOT provided in the User Input and cannot be confidently inferred from the Role (e.g., standard skills for a Developer), set the value to `null`.
+        - Do not make up fake data for `salary_range`, `work_location`, `experience_range` if not provided.
+        - **EXCEPTION**: For `preferred_skills`, if the user has not provided it, YOU MUST GENERATE relevant nice-to-have skills based on the `requirements` and `job_role`. Do not leave it empty or null.
+
+        **REQUIRED RESPONSE JSON STRUCTURE:**
+        OUTPUT ONLY THE VALID JSON OBJECT. NO MARKDOWN.
+        {{
+          "requester_recruiter_details": {{
+              "employee_id": "string or null",
+              "employee_name": "string or null",
+              "employee_email_id": "string or null",
+              "reports_to_id": "string or null",
+              "reports_to_name": "string or null",
+              "reports_to_email": "string or null"
+          }},
+          "basic_job_details": {{
+              "job_code": "string or null",
+              "job_title": "string",
+              "no_of_positions": "string or null",
+              "oprations": "INSERT",
+              "department": "string or null",
+              "job_type": "string or null",
+              "work_location": "string or null",
+              "jd_shift": "string or null",
+              "total_budget": "string or null",
+              "postion_open_date": "string or null",
+              "positionclosedate": "string or null",
+              "jd_validity_period": "string or null",
+              "experience_range": "string or null",
+              "salary_range": "string or null",
+              "joining_timeline": "string or null",
+              "travel_requirement": "string or null"
+          }},
+          "role_description": {{
+              "required_skills": "string",
+              "preferred_skills": "string",
+              "minimum_qualifications": "string",
+              "languages": "string",
+              "overview": "string",
+              "key_responsibilities": "string",
+              "benefits": "string",
+              "desired_attributes": "string",
+              "key_skills_and_qualifications": "string"
+          }}
+        }}
+        """
         # We 'await' the result from the now-async llm_service method
         generated_text = await llm_service.generate_text(prompt)
         

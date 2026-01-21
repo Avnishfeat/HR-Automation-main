@@ -28,34 +28,37 @@ from app.agents.interview.api.interview import router as interview_router
 from app.agents.interview.core.startup import initialize_services as initialize_interview_services
 
 # Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+from app.core.logging import setup_logging
+# Initialize logging immediately to capture import-time errors if any, 
+# though usually it's better in lifespan. 
+# For now, we'll do it in lifespan to ensure config is loaded.
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events"""
+    # Initialize global logging (masks secrets)
+    setup_logging()
+    
     # Startup
-    logger.info("🚀 Starting Multi-Agent Platform...")
+    logger.info(" Starting Multi-Agent Platform...")
     await DatabaseService.connect_db(settings.MONGODB_URL)
     
     # Initialize Interview Services
     try:
         initialize_interview_services()
-        logger.info("✅ Interview Services initialized")
+        logger.info(" Interview Services initialized")
     except Exception as e:
         logger.error(f"❌ Failed to initialize Interview Services: {e}")
-    logger.info("✅ Application started successfully")
+    logger.info(" Application started successfully")
     
     yield
     
     # Shutdown
-    logger.info("🛑 Shutting down...")
+    logger.info(" Shutting down...")
     await DatabaseService.close_db()
-    logger.info("✅ Application shut down successfully")
+    logger.info(" Application shut down successfully")
 
 
 # Create FastAPI app

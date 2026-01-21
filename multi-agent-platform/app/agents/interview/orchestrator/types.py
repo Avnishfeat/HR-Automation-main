@@ -36,7 +36,7 @@ class InterviewSession(NamedTuple):
     candidate_id: str
     meet: Any 
     stop_event: threading.Event
-    # ✅ NEW FIELD: Linked set for real-time flag monitoring
+    #  NEW FIELD: Linked set for real-time flag monitoring
     malpractice_flags: Set[str] 
 
 class ResponseData(NamedTuple):
