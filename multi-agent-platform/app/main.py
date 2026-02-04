@@ -108,3 +108,8 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
             await manager.send_message(f"Echo: {data}", client_id)
     except WebSocketDisconnect:
         manager.disconnect(websocket, client_id)
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app.main:app", host="0.0.0.0", port=settings.APP_PORT, reload=settings.DEBUG)

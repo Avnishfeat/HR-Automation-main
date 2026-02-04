@@ -45,7 +45,7 @@ def initialize_services():
         # This prevents "Connection pool is full" warnings
         # Default pool size is 10, we increase to 100 to handle concurrent Gemini API calls
         urllib3.PoolManager(num_pools=50, maxsize=100)
-        logger.info("✓ urllib3 connection pool configured (maxsize=100)")
+        logger.info(" urllib3 connection pool configured (maxsize=100)")
         
         # 1. Database (Infrastructure Layer)
         try:
@@ -104,7 +104,7 @@ def initialize_services():
         except Exception as e:
             raise ServiceInitializationError("Orchestration Services", str(e))
 
-        logger.info("✓ All services initialized successfully (Singleton Pattern Enforced)")
+        logger.info(" All services initialized successfully (Singleton Pattern Enforced)")
         
     except ServiceInitializationError:
         raise
@@ -141,7 +141,7 @@ def create_app() -> FastAPI:
     async def startup_event():
         """Start background cleanup task on app startup"""
         await start_cleanup_task()
-        logger.info("✓ Zombie cleanup task started")
+        logger.info(" Zombie cleanup task started")
     
     # Add shutdown handler to gracefully close HTTP connections
     @app.on_event("shutdown")
@@ -150,7 +150,7 @@ def create_app() -> FastAPI:
         logger.info("Shutting down application...")
         await stop_cleanup_task()
         GeminiService.cleanup_shared_client()
-        logger.info("✓ Application shutdown complete")
+        logger.info(" Application shutdown complete")
     
     return app
 

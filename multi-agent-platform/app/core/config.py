@@ -5,6 +5,7 @@ class Settings(BaseSettings):
     # App Settings
     APP_NAME: str = "Multi-Agent Platform"
     APP_VERSION: str = "1.0.0"
+    APP_PORT: int = 5649
     DEBUG: bool = True
     
     # Database

@@ -102,6 +102,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+virtualenv/
 
 # Spyder project settings
 .spyderproject
@@ -125,3 +126,4 @@ captured_frames/
 data/
 chrome_profile/
 uploads/
+service_account.json

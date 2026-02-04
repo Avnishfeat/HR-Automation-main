@@ -113,7 +113,7 @@ class Config:
         logger.info("--- Secrets Status ---")
         secrets_health = secrets.health_check()
         for secret_name, status in secrets_health.items():
-            status_str = "✓ SET" if status["set"] else "✗ NOT SET"
+            status_str = " SET" if status["set"] else "✗ NOT SET"
             required_str = "(required)" if status["required"] else "(optional)"
             logger.info(f"  {secret_name}: {status_str} {required_str}")
         logger.info("="*60)

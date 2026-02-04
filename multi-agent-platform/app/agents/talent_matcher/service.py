@@ -32,6 +32,9 @@ class TalentMatcherService:
         Extracts degree requirement from job description.
         Looks in minimum_qualification field.
         """
+        if not job_description.minimum_qualification:
+            return "Bachelor"  # Default fallback
+
         qualification = job_description.minimum_qualification.lower()
         
         # Check for common degree types
@@ -50,7 +53,7 @@ class TalentMatcherService:
         Looks in key_skills_and_qualifications and overview fields.
         """
         # Combine relevant fields
-        text = f"{job_description.key_skills_and_qualifications} {job_description.overview}".lower()
+        text = f"{job_description.key_skills_and_qualifications or ''} {job_description.overview or ''}".lower()
         
         # Look for patterns like "5+ years", "5 years", "minimum of 5 years"
         patterns = [
@@ -75,12 +78,12 @@ class TalentMatcherService:
         return f"""
         {job_description.overview}
         
-        Required Skills: {job_description.required_skills}
-        Preferred Skills: {job_description.preferred_skills}
-        Key Responsibilities: {job_description.key_responsibilities}
-        Key Skills and Qualifications: {job_description.key_skills_and_qualifications}
-        Languages: {job_description.languages}
-        Desired Attributes: {job_description.desired_attributes}
+        Required Skills: {job_description.required_skills or ''}
+        Preferred Skills: {job_description.preferred_skills or ''}
+        Key Responsibilities: {job_description.key_responsibilities or ''}
+        Key Skills and Qualifications: {job_description.key_skills_and_qualifications or ''}
+        Languages: {job_description.languages or ''}
+        Desired Attributes: {job_description.desired_attributes or ''}
         """
 
     def match(self, request):
@@ -139,8 +142,8 @@ class TalentMatcherService:
         specific skills from the job description.
         """
         # Get required skills as individual keywords
-        required_skills = job_description.required_skills.lower()
-        languages = job_description.languages.lower()
+        required_skills = (job_description.required_skills or "").lower()
+        languages = (job_description.languages or "").lower()
         
         # Combine and clean
         jd_keywords = set(word.lower().strip(',.:;') for word in jd.split() if len(word) > 3)

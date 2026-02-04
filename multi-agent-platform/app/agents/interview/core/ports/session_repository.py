@@ -16,6 +16,11 @@ class SessionRepository(ABC):
     def get_file(self, filename: str) -> Optional[bytes]:
         pass
 
+    @abstractmethod
+    def list_files(self, prefix: str) -> List[str]:
+        """List files starting with prefix."""
+        pass
+
     # --- Session Management ---
     @abstractmethod
     def create_session(self, resume_text: str, candidate_id: str, job_role: str, questionnaire: List[str], job_description: Optional[str] = None) -> str:

@@ -44,7 +44,7 @@ class GeminiService:
             # The SDK manages its own connection pool efficiently by default.
             self.client = genai.Client(api_key=gemini_api_key)
             
-            logger.info("✓ GeminiService: Client configured successfully.")
+            logger.info(" GeminiService: Client configured successfully.")
             
         except Exception as e:
             logger.error(f"GeminiService Initialization Failed: {e}", exc_info=True)
@@ -114,7 +114,7 @@ class GeminiService:
             self.active_chat_sessions[session_id] = self.client.chats.create(
                 model=self.MODEL_NAME, history=history, config=self._get_config(temperature=0.7)
             )
-            logger.info(f"✓ GeminiService: Session {session_id} ready.")
+            logger.info(f" GeminiService: Session {session_id} ready.")
             
             # Re-enable the simple warmup (safe version)
             threading.Thread(target=self._warmup_model, daemon=True).start()

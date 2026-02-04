@@ -59,6 +59,20 @@ class MongoSessionRepository(SessionRepository):
         except Exception:
             return None
 
+    def list_files(self, prefix: str) -> List[str]:
+        try:
+            # Escape regex characters in prefix just in case
+            import re
+            escaped_prefix = re.escape(prefix)
+            regex = f"^{escaped_prefix}"
+            
+            cursor = self.fs.find({"filename": {"$regex": regex}})
+            files = [grid_out.filename for grid_out in cursor]
+            return sorted(files)
+        except Exception as e:
+            logger.error(f"Failed to list files with prefix {prefix}: {e}")
+            return []
+
     def create_session(self, resume_text: str, candidate_id: str, job_role: str, questionnaire: List[str], job_description: Optional[str] = None) -> str:
         session_data = {
             "candidate_id": candidate_id, 

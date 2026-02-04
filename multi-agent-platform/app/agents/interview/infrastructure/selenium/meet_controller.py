@@ -93,7 +93,8 @@ class MeetController:
             options.add_argument('--disable-plugins-discovery')
 
             logger.info("Creating Chrome driver...")
-            self.driver = uc.Chrome(options=options)
+            # Force version 144 to match installed Chrome
+            self.driver = uc.Chrome(options=options, version_main=144)
 
             self.driver.set_page_load_timeout(BrowserConfig.PAGE_LOAD_TIMEOUT_SEC)
             self.driver.implicitly_wait(BrowserConfig.IMPLICIT_WAIT_SEC)

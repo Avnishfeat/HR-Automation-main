@@ -115,8 +115,8 @@ class MeetSessionManager:
 
             logger.info(f"Bot joined meeting: {session_id}")
 
-            snapshot_dir = Path(StoragePaths.DATA_ROOT) / candidate_id / session_id / StoragePaths.SNAPSHOTS_DIR
-            snapshot_dir.mkdir(parents=True, exist_ok=True)
+            # snapshot_dir = Path(StoragePaths.DATA_ROOT) / candidate_id / session_id / StoragePaths.SNAPSHOTS_DIR
+            # snapshot_dir.mkdir(parents=True, exist_ok=True)
 
             # Store Session Data using RLock for thread safety
             # RLock allows the same thread (e.g. Capture) to re-acquire if needed
@@ -129,7 +129,7 @@ class MeetSessionManager:
                 'status': 'active',
                 'video_enabled': enable_video,
                 'video_capture_method': video_capture_method,
-                'snapshot_dir': snapshot_dir,
+                'snapshot_dir': None, # Removed local dir
                 'snapshot_count': 0,
                 'snapshot_thread': None,
                 'stop_capture': threading.Event(),
@@ -183,8 +183,9 @@ class MeetSessionManager:
 
         def capture_loop():
             logger.info(f"Video capture thread started for {session_id}")
-            session_dir = Path(StoragePaths.CAPTURED_IMAGES_DIR) / session_id
-            session_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Video capture thread started for {session_id}")
+            # session_dir = Path(StoragePaths.CAPTURED_IMAGES_DIR) / session_id
+            # session_dir.mkdir(parents=True, exist_ok=True)
 
             while stop_event and not stop_event.is_set():
                 try:
@@ -214,13 +215,13 @@ class MeetSessionManager:
                         if integrity_status != "ok":
                             self._handle_video_integrity_failure(session_id, integrity_status)
                         
-                        # 4. SAVE
+                        # 4. SAVE TO DB
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-                        filename = f"snap_{timestamp}_{capture_source}.jpg"
-                        filepath = session_dir / filename
+                        filename = f"captured_frames/{session_id}/snap_{timestamp}_{capture_source}.jpg"
                         
-                        with open(filepath, "wb") as f:
-                            f.write(image_bytes)
+                        self.db.save_file(filename, image_bytes, "image/jpeg")
+                        # with open(filepath, "wb") as f:
+                        #     f.write(image_bytes)
                         
                         current_count = session.get('snapshot_count', 0)
                         session['snapshot_count'] = current_count + 1
@@ -343,15 +344,12 @@ class MeetSessionManager:
             return session.get('snapshot_count', 0)
         
         try:
-            session_data = self.db.get_session(session_id)
-            if session_data:
-                candidate_id = session_data.get('candidate_id')
-                if candidate_id:
-                    snapshot_dir = Path(StoragePaths.DATA_ROOT) / candidate_id / session_id / StoragePaths.SNAPSHOTS_DIR
-                    if snapshot_dir.exists():
-                        return len(list(snapshot_dir.glob("*.jpg")))
+            # Count from DB
+            prefix = f"captured_frames/{session_id}/"
+            files = self.db.list_files(prefix)
+            return len(files)
         except Exception as e:
-            logger.error(f"Error counting disk snapshots: {e}")
+            logger.error(f"Error counting db snapshots: {e}")
         return 0
 
     def get_capture_stats(self, session_id: str) -> Optional[Dict[str, Any]]:

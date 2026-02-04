@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from PIL import Image
+import io
 
 from .analysis_base import BaseAnalyzer, FileUploadMixin
 from app.agents.interview.config.prompt_templates import PromptTemplates
@@ -48,29 +49,24 @@ class CombinedAnalyzer(BaseAnalyzer, FileUploadMixin):
         try:
             logger.info(f"Starting behavioral analysis for {user_id}/{session_id}")
             
-            # Primary location: captured_frames/{session_id} (where MeetSessionManager saves)
-            snapshot_dir = Path("captured_frames") / session_id
-            
-            # Fallback: data/{user_id}/{session_id}/snapshots (legacy path)
-            if not snapshot_dir.exists():
-                snapshot_dir = Path("data") / user_id / session_id / "snapshots"
-            
-            if not snapshot_dir.exists():
-                logger.warning(f"Snapshot dir not found: {snapshot_dir}")
+            # --- UPDATED: Retrieving from MongoDB GridFS ---
+            if not self.db:
+                logger.error("No DB handler for behavioral analysis")
                 return None
-            
-            # Try both filename patterns
-            snapshot_files = sorted(snapshot_dir.glob("snap_*.jpg"))
-            if not snapshot_files:
-                snapshot_files = sorted(snapshot_dir.glob("snapshot_*.jpg"))
+
+            # List files from DB
+            prefix = f"captured_frames/{session_id}/"
+            snapshot_files = self.db.list_files(prefix)
             
             if not snapshot_files:
-                logger.warning("No snapshots found")
+                logger.warning(f"No snapshots found for {session_id} in DB")
+                # Fallback to legacy disk check (optional, but keeping it simpler: fail if not in DB)
                 return None
             
-            logger.info(f"Found {len(snapshot_files)} snapshots")
+            logger.info(f"Found {len(snapshot_files)} snapshots in DB")
             
-            images = self._load_images(snapshot_files)
+            # Load images from DB
+            images = self._load_images_from_db(snapshot_files)
             
             if not images:
                 return None
@@ -103,14 +99,16 @@ class CombinedAnalyzer(BaseAnalyzer, FileUploadMixin):
             logger.error(f"Behavioral analysis failed: {e}")
             return None
     
-    def _load_images(self, file_paths: List[Path]) -> List[Image.Image]:
-        """Loads images from file paths."""
+    def _load_images_from_db(self, filenames: List[str]) -> List[Image.Image]:
+        """Loads images from MongoDB GridFS."""
         images = []
-        for path in file_paths:
+        for fname in filenames:
             try:
-                images.append(Image.open(path))
-            except Exception:
-                pass
+                data = self.db.get_file(fname)
+                if data:
+                    images.append(Image.open(io.BytesIO(data)))
+            except Exception as e:
+                logger.warning(f"Failed to load image {fname}: {e}")
         return images
     
     # =========================================================================
