@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     # CORS
     ALLOWED_ORIGINS: list = ["*"]
 
+    # --- Security ---
+    SECRET_KEY: str = "your-super-secret-key-change-in-production"
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+
     # --- Interview Bot Settings ---
     GOOGLE_CLOUD_PROJECT: Optional[str] = None
     GOOGLE_CLOUD_LOCATION: str = "us-central1"
