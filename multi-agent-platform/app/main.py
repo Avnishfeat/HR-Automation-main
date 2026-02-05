@@ -1,21 +1,19 @@
-# app/main.py
-
-# STEP 1: Load environment variables at the very top
 from dotenv import load_dotenv
 load_dotenv()
 
-# --- Standard Library Imports ---
+# Standard Library Imports 
 from contextlib import asynccontextmanager
 import logging
 
-# --- Third-Party Imports ---
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+# Third-Party Imports 
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
 
-# --- Application-Specific Imports ---
+# Application-Specific Imports
 from app.core.config import settings
 from app.services.database import DatabaseService
 from app.core.dependencies import get_websocket_manager
+
 
 # Import agent routers
 from app.agents.jd_agent.router import router as jd_router
@@ -27,11 +25,14 @@ from app.agents.question_generator.router import router as question_generator_ro
 from app.agents.interview.api.interview import router as interview_router
 from app.agents.interview.core.startup import initialize_services as initialize_interview_services
 
+# Security imports
+from app.core.dependencies import get_current_user
+from app.routers import auth as auth_router
+from app.services.user_service import UserService
+
 # Setup logging
 from app.core.logging import setup_logging
-# Initialize logging immediately to capture import-time errors if any, 
-# though usually it's better in lifespan. 
-# For now, we'll do it in lifespan to ensure config is loaded.
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,23 +43,32 @@ async def lifespan(app: FastAPI):
     setup_logging()
     
     # Startup
-    logger.info(" Starting Multi-Agent Platform...")
+    logger.info("Starting Multi-Agent Platform...")
     await DatabaseService.connect_db(settings.MONGODB_URL)
     
+    # --- NEW: Ensure Unique Email Index ---
+    # This runs once on startup to tell MongoDB: "Never allow duplicate emails"
+    try:
+        user_service = UserService()
+        await user_service.ensure_indexes()
+    except Exception as e:
+        logger.error(f"Failed to create database indexes: {e}")
+
     # Initialize Interview Services
     try:
         initialize_interview_services()
-        logger.info(" Interview Services initialized")
+        logger.info("Interview Services initialized")
     except Exception as e:
-        logger.error(f"❌ Failed to initialize Interview Services: {e}")
-    logger.info(" Application started successfully")
+        logger.error(f"Failed to initialize Interview Services: {e}")
+    
+    logger.info("Application started successfully")
     
     yield
     
     # Shutdown
-    logger.info(" Shutting down...")
+    logger.info("Shutting down...")
     await DatabaseService.close_db()
-    logger.info(" Application shut down successfully")
+    logger.info("Application shut down successfully")
 
 
 # Create FastAPI app
@@ -77,14 +87,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-app.include_router(example_agent_router, prefix="/api/v1/example", tags=["Example Agent"])
-app.include_router(jd_router, prefix="/api/v1/jd", tags=["Job Description Agent"])
-app.include_router(criteria_router, prefix="/api/v1/criteria", tags=["Candidate Criteria Agent"])
-app.include_router(job_post_agent_router,prefix="/api/v1", tags=["Job Post Agent"])
-app.include_router(talent_matcher_router,prefix="/api/v1/talent_matcher", tags=["Talent Matcher Agent"])
-app.include_router(question_generator_router,prefix="/api/v1/question_generator", tags=["Question Generator Agent"])
-app.include_router(interview_router, prefix="/api/v1/interview", tags=["Interview Agent"])
+# Auth router
+app.include_router(auth_router.router, prefix="/api/v1/auth", tags=["Authentication"])
 
 @app.get("/")
 async def root():
@@ -94,6 +98,57 @@ async def root():
         "docs": "/docs"
     }
 
+# Protected Routes - Requires Authentication
+protected_deps = [Depends(get_current_user)]
+
+app.include_router(
+    example_agent_router, 
+    prefix="/api/v1/example", 
+    tags=["Example Agent"],
+    dependencies=protected_deps
+    )
+
+app.include_router(
+    jd_router, 
+    prefix="/api/v1/jd", 
+    tags=["Job Description Agent"], 
+    dependencies=protected_deps
+    )
+
+app.include_router(
+    criteria_router, 
+    prefix="/api/v1/criteria", 
+    tags=["Candidate Criteria Agent"],
+    dependencies=protected_deps
+    )
+
+app.include_router(
+    job_post_agent_router,
+    prefix="/api/v1", 
+    tags=["Job Post Agent"], 
+    dependencies=protected_deps
+    )
+
+app.include_router(
+    talent_matcher_router,
+    prefix="/api/v1/talent_matcher", 
+    tags=["Talent Matcher Agent"],
+    dependencies=protected_deps
+    )
+
+app.include_router(
+    question_generator_router,
+    prefix="/api/v1/question_generator", 
+    tags=["Question Generator Agent"],
+    dependencies=protected_deps
+    )
+
+app.include_router(
+    interview_router, 
+    prefix="/api/v1/interview", 
+    tags=["Interview Agent"], 
+    dependencies=protected_deps
+    )
 
 # WebSocket example endpoint
 @app.websocket("/ws/{client_id}")

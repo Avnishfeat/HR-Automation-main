@@ -16,14 +16,6 @@ async def generate_jd(
     payload: JDInput,
     llm_service: LLMService = Depends(get_llm_service)
 ):
-    """
-    Accepts a job role, experience, and requirements to generate
-    a complete job description using a predefined template.
-    
-    This endpoint is asynchronous and uses dependency injection for the LLM service.
-    
-    Returns a structure compatible with Talent Matcher Agent.
-    """
     try:
         jd_json = await generate_job_description(payload, llm_service)
         
@@ -55,10 +47,6 @@ async def generate_jd_flat(
     payload: JDInput,
     llm_service: LLMService = Depends(get_llm_service)
 ):
-    """
-    Alternative endpoint that returns flat structure (original format).
-    Use /generate for Talent Matcher compatibility.
-    """
     try:
         jd_json = await generate_job_description(payload, llm_service)
         
