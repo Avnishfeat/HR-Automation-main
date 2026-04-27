@@ -3,6 +3,8 @@ import logging
 import asyncio
 import re
 import hashlib
+import threading
+import time
 from datetime import datetime
 from typing import Optional, List, Iterator, Dict
 from pathlib import Path
@@ -23,6 +25,8 @@ class InterviewService:
         self.transcript_manager = TranscriptManager(self.db)
         self.combined_analyzer = combined_analyzer
         self.candidate_names: Dict[str, str] = {}
+        self._transcript_tasks: Dict[str, List[threading.Thread]] = {}
+        self._transcript_tasks_lock = threading.Lock()
 
     # =========================================================================
     # SESSION MANAGEMENT
@@ -71,7 +75,8 @@ class InterviewService:
     def end_interview_session(self, session_id: str):
         if session_id in self.candidate_names:
             del self.candidate_names[session_id]
-        
+
+        self._wait_for_transcript_tasks(session_id)
         self.gemini_service.end_session(session_id)
         self.tts_service.end_session(session_id)
         self.transcript_manager.clear_session_state(session_id)
@@ -243,8 +248,10 @@ class InterviewService:
         end_time: Optional[datetime],
         is_follow_up_response: bool = False
     ):
-        """Delegates transcript processing and logging to TranscriptManager."""
-        self.transcript_manager.process_and_log_transcript(
+        """Schedules transcript persistence off the critical reply path."""
+        self._start_transcript_task(
+            session_id,
+            self.transcript_manager.process_and_log_transcript,
             session_id,
             audio_path,
             transcript,
@@ -252,13 +259,14 @@ class InterviewService:
             candidate_id,
             start_time,
             end_time,
-            is_follow_up_response
+            is_follow_up_response,
         )
 
     def generate_final_transcript_file(self, session_id: str):
         """Generates the final transcript file."""
         try:
-            self.transcript_manager.generate_final_transcript_file(session_id)
+            self._wait_for_transcript_tasks(session_id)
+            self.transcript_manager.save_final_transcript_to_db(session_id)
         except Exception as e:
             logger.error(f"Failed to generate transcript: {e}", exc_info=True)
 
@@ -355,3 +363,49 @@ class InterviewService:
             is_follow_up=False
         )
         return result if result is not None else iter([])
+
+    def _start_transcript_task(self, session_id: str, target, *args) -> None:
+        def worker():
+            try:
+                target(*args)
+            finally:
+                self._remove_transcript_task(session_id, threading.current_thread())
+
+        thread = threading.Thread(
+            target=worker,
+            daemon=True,
+            name=f"TranscriptPersist-{session_id[:8]}",
+        )
+        with self._transcript_tasks_lock:
+            self._transcript_tasks.setdefault(session_id, []).append(thread)
+        thread.start()
+
+    def _remove_transcript_task(self, session_id: str, task: threading.Thread) -> None:
+        with self._transcript_tasks_lock:
+            tasks = self._transcript_tasks.get(session_id)
+            if not tasks:
+                return
+            if task in tasks:
+                tasks.remove(task)
+            if not tasks:
+                self._transcript_tasks.pop(session_id, None)
+
+    def _wait_for_transcript_tasks(self, session_id: str, timeout_sec: float = 5.0) -> None:
+        deadline = time.time() + timeout_sec
+        while True:
+            with self._transcript_tasks_lock:
+                tasks = list(self._transcript_tasks.get(session_id, []))
+
+            if not tasks:
+                return
+
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                logger.warning(
+                    "Timed out waiting for transcript persistence tasks | session=%s pending=%s",
+                    session_id,
+                    len(tasks),
+                )
+                return
+
+            tasks[0].join(timeout=min(0.25, remaining))

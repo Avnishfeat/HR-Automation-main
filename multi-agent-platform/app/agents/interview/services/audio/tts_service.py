@@ -1,6 +1,7 @@
 # app/services/tts_service.py
 import os
 import logging
+import time
 from typing import Optional, Dict, Any, Tuple, List
 from pathlib import Path
 from google.cloud import texttospeech
@@ -24,6 +25,9 @@ class TTSService:
     def __init__(self, db_handler: SessionRepository):
         self.db = db_handler
         self._session_tts_char_counts = defaultdict(int)
+        self._logging_tasks: Dict[str, List[threading.Thread]] = defaultdict(list)
+        self._logging_tasks_lock = threading.Lock()
+        self._usage_lock = threading.Lock()
         
         # Setup Cache Directory (Transient/Local for playback)
         self.cache_dir = Path("data/static_cache")
@@ -148,7 +152,7 @@ class TTSService:
 
             combined_text = " ".join(full_question_text)
             if combined_text:
-                self._log_usage_and_save(combined_text, session_id, turn_count, candidate_id, is_follow_up)
+                self._enqueue_usage_log(combined_text, session_id, turn_count, candidate_id, is_follow_up)
 
         except Exception as e:
             logger.error(f"Error in stream_tts: {e}", exc_info=True)
@@ -157,7 +161,7 @@ class TTSService:
     def stream_plain_text(self, plain_text: str, session_id: str, turn_count: Any, candidate_id: str, is_follow_up: bool = False) -> iter:
         if not self.tts_client: return
         try:
-            self._log_usage_and_save(plain_text, session_id, turn_count, candidate_id, is_follow_up)
+            self._enqueue_usage_log(plain_text, session_id, turn_count, candidate_id, is_follow_up)
             def request_generator():
                 yield texttospeech.StreamingSynthesizeRequest(
                     streaming_config={
@@ -175,7 +179,8 @@ class TTSService:
 
     def _log_usage_and_save(self, text: str, session_id: str, turn_count: Any, candidate_id: str, is_follow_up: bool):
         char_count = len(text)
-        self._session_tts_char_counts[session_id] += char_count
+        with self._usage_lock:
+            self._session_tts_char_counts[session_id] += char_count
         self.db.update_tts_character_usage(session_id, char_count)
         self.db.add_message_to_session(
             session_id, "assistant", text, 
@@ -184,5 +189,61 @@ class TTSService:
         )
 
     def end_session(self, session_id: str):
+        self._wait_for_logging_tasks(session_id)
         if session_id in self._session_tts_char_counts:
             del self._session_tts_char_counts[session_id]
+        with self._logging_tasks_lock:
+            self._logging_tasks.pop(session_id, None)
+
+    def _enqueue_usage_log(
+        self,
+        text: str,
+        session_id: str,
+        turn_count: Any,
+        candidate_id: str,
+        is_follow_up: bool,
+    ) -> None:
+        def worker():
+            try:
+                self._log_usage_and_save(text, session_id, turn_count, candidate_id, is_follow_up)
+            finally:
+                self._remove_logging_task(session_id, threading.current_thread())
+
+        task = threading.Thread(
+            target=worker,
+            daemon=True,
+            name=f"TTSLog-{session_id[:8]}",
+        )
+        with self._logging_tasks_lock:
+            self._logging_tasks[session_id].append(task)
+        task.start()
+
+    def _remove_logging_task(self, session_id: str, task: threading.Thread) -> None:
+        with self._logging_tasks_lock:
+            tasks = self._logging_tasks.get(session_id)
+            if not tasks:
+                return
+            if task in tasks:
+                tasks.remove(task)
+            if not tasks:
+                self._logging_tasks.pop(session_id, None)
+
+    def _wait_for_logging_tasks(self, session_id: str, timeout_sec: float = 5.0) -> None:
+        deadline = time.time() + timeout_sec
+        while True:
+            with self._logging_tasks_lock:
+                tasks = list(self._logging_tasks.get(session_id, []))
+
+            if not tasks:
+                return
+
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                logger.warning(
+                    "Timed out waiting for TTS logging tasks | session=%s pending=%s",
+                    session_id,
+                    len(tasks),
+                )
+                return
+
+            tasks[0].join(timeout=min(0.25, remaining))

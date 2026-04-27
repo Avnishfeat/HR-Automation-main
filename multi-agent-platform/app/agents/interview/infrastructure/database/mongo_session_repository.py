@@ -6,9 +6,8 @@ from bson.objectid import ObjectId
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
-# Imports
-from app.agents.interview.config.settings import Config
 from app.agents.interview.core.ports.session_repository import SessionRepository
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -16,11 +15,11 @@ class MongoSessionRepository(SessionRepository):
     TRANSCRIPT_BUCKET_SIZE = 50
 
     def __init__(self):
-        mongodb_url = Config.get_mongodb_url()
+        mongodb_url = settings.MONGODB_URL
             
         try:
             self.client = pymongo.MongoClient(mongodb_url, serverSelectionTimeoutMS=5000)
-            self.db = self.client['ai_interviewer_db']
+            self.db = self.client[settings.DATABASE_NAME]
             self.fs = gridfs.GridFS(self.db)
             
             self.sessions = self.db['sessions']

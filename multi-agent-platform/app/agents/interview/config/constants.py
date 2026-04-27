@@ -7,16 +7,16 @@ class AudioConfig:
     SAMPLE_RATE_48K: Final[int] = 48000  # Google Meet standard
     
     # Virtual Audio Device Names
-    PLAYBACK_DEVICE_NAME: Final[str] = "CABLE Input (VB-Audio Virtual Cable)"
-    RECORDING_DEVICE_NAME: Final[str] = "CABLE Output (VB-Audio Virtual Cable)"
+    PLAYBACK_DEVICE_NAME: Final[str] = "CABLE Input"
+    RECORDING_DEVICE_NAME: Final[str] = "CABLE Output"
     
     # Audio Processing
     MIN_SPEECH_DURATION_SEC: Final[float] = 0.75  # Minimum speech before considering as response
-    VOLUME_THRESHOLD: Final[float] = 0.005        # Minimum volume to detect speech (increased to filter background noise)
+    VOLUME_THRESHOLD: Final[float] = 0.005         # Minimum volume to detect speech (increased from 0.005 to filter background noise)
     MAX_RECORDING_DURATION_SEC: Final[int] = 120  # Hard timeout for recording
     
     # Simple fixed silence detection (no adaptive logic)
-    SILENCE_THRESHOLD_SEC: Final[float] = 1.5     # Silence duration to stop recording
+    SILENCE_THRESHOLD_SEC: Final[float] = 1.0     # Silence duration to stop recording
     MIN_RECORDING_SEC: Final[float] = 1.0         # Minimum recording time before silence can trigger
 
     # Audio Quality Checks
@@ -32,7 +32,7 @@ class InterviewTiming:
     
     MAX_INTRO_ATTEMPTS: Final[int] = 2
     
-    MIC_TOGGLE_DELAY_SEC: Final[float] = 0.5
+    MIC_TOGGLE_DELAY_SEC: Final[float] = 0.1
     POST_PLAYBACK_DELAY_SEC: Final[float] = 0.5
     MEET_UI_SETTLE_DELAY_SEC: Final[int] = 3
     TRANSCRIPT_PROPAGATION_DELAY_SEC: Final[float] = 0.1
@@ -92,15 +92,18 @@ class SessionStatus:
     ACTIVE_INTERVIEWING: Final[str] = "active_interviewing"
     ACTIVE_ANALYZING: Final[str] = "active_analyzing"
     CANDIDATE_JOINED: Final[str] = "candidate_joined"
+    STOP_REQUESTED: Final[str] = "stop_requested"
     
     COMPLETED: Final[str] = "completed"
     COMPLETED_NO_ANALYSIS: Final[str] = "completed_no_analysis"
     TIME_LIMIT_REACHED: Final[str] = "time_limit_reached"
 
+    ERROR_CAPACITY_REACHED: Final[str] = "error_capacity_reached"
     ERROR_JOIN_FAILED: Final[str] = "error_join_failed"
     ERROR_CANDIDATE_NO_SHOW: Final[str] = "error_candidate_no_show"
     ERROR_CANDIDATE_LEFT: Final[str] = "error_candidate_left"
     ERROR_MULTIPLE_PARTICIPANTS: Final[str] = "error_multiple_participants"
+    ERROR_ANALYSIS_EMPTY: Final[str] = "error_analysis_empty"
     ERROR_ANALYSIS_FAILED: Final[str] = "error_analysis_failed"
     ERROR_FATAL_TASK: Final[str] = "error_fatal_task"
     
@@ -148,6 +151,7 @@ class BrowserConfig:
     PAGE_LOAD_TIMEOUT_SEC: Final[int] = 60
     IMPLICIT_WAIT_SEC: Final[int] = 10
     ELEMENT_WAIT_TIMEOUT_SEC: Final[int] = 15
+    HEADLESS: Final[bool] = True
     
     # Join button search
     JOIN_BUTTON_SEARCH_TIMEOUT_SEC: Final[int] = 60

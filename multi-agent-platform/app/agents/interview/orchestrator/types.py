@@ -26,6 +26,7 @@ class InterviewState(BaseModel):
     start_time: float = Field(default_factory=lambda: datetime.now().timestamp())
     current_question_text: Optional[str] = None
     last_user_transcript: Optional[str] = None
+    exit_confirmation_pending: bool = False
     is_resumed: bool = False
     consecutive_error_count: int = 0
     total_error_count: int = 0

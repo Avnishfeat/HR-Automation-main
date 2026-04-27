@@ -23,7 +23,7 @@ class DatabaseService:
         """Close MongoDB connection"""
         if cls.client:
             cls.client.close()
-            logger.info("🔌 MongoDB connection closed")
+            logger.info(" MongoDB connection closed")
     
     @classmethod
     def get_database(cls, db_name: str):

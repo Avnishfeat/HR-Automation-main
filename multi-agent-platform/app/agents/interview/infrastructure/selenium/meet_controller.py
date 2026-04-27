@@ -57,6 +57,10 @@ class MeetController:
                 options.add_argument('--use-fake-ui-for-media-stream')
                 options.add_argument('--enable-usermedia-screen-capturing')
                 options.add_argument('--allow-file-access-from-files')
+                # Disable Chrome audio processing to stop Google Meet from silencing the bot's TTS
+                options.add_argument('--disable-audio-processing')
+                options.add_argument('--disable-noise-suppression')
+                options.add_argument('--disable-echo-cancellation')
 
                 prefs = {
                     "profile.default_content_setting_values.media_stream_mic": 1,
@@ -93,8 +97,8 @@ class MeetController:
             options.add_argument('--disable-plugins-discovery')
 
             logger.info("Creating Chrome driver...")
-            # Force version 144 to match installed Chrome
-            self.driver = uc.Chrome(options=options, version_main=144)
+            # Force version 146 to match installed Chrome
+            self.driver = uc.Chrome(options=options, version_main=146)
 
             self.driver.set_page_load_timeout(BrowserConfig.PAGE_LOAD_TIMEOUT_SEC)
             self.driver.implicitly_wait(BrowserConfig.IMPLICIT_WAIT_SEC)
@@ -179,12 +183,10 @@ class MeetController:
                 f"(will try for {BrowserConfig.JOIN_BUTTON_SEARCH_TIMEOUT_SEC} seconds)..."
             )
             join_locators = [
-                (By.XPATH, 
-                 "//button[.//span[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', "
-                 "'abcdefghijklmnopqrstuvwxyz'), 'join now')]]"),
-                (By.XPATH, 
-                 "//button[.//span[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', "
-                 "'abcdefghijklmnopqrstuvwxyz'), 'ask to join')]]")
+                (By.XPATH, "//*[@role='button' or self::button][contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'join now')]"),
+                (By.XPATH, "//*[@role='button' or self::button][contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'ask to join')]"),
+                (By.XPATH, "//span[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'join now') or contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'ask to join')]/ancestor::*[@role='button' or self::button]"),
+                (By.CSS_SELECTOR, "button[jsname='Qx7uuf'], button[jsname='x81Dce'], div[jsname='Qx7uuf'], div[jsname='x81Dce']")
             ]
 
             join_button = None
@@ -219,6 +221,16 @@ class MeetController:
                     f"Could not find join button after "
                     f"{BrowserConfig.JOIN_BUTTON_SEARCH_TIMEOUT_SEC} seconds"
                 )
+                logger.error(f"Current page URL: {self.driver.current_url}")
+                
+                try:
+                    # Save a screenshot to help debug
+                    screenshot_path = os.path.join(os.getcwd(), "failed_join_screenshot.png")
+                    self.driver.save_screenshot(screenshot_path)
+                    logger.error(f"Saved screenshot to {screenshot_path}")
+                except Exception as ex:
+                    pass
+                
                 return False
 
         except Exception as e:

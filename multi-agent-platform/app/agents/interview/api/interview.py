@@ -6,6 +6,7 @@ from typing import Optional, List, Dict, Any
 
 from fastapi import APIRouter, UploadFile, File, Form, BackgroundTasks, HTTPException, Request, Response
 
+from app.agents.interview.config.constants import SessionStatus
 from app.agents.interview.core.startup import get_services
 from app.agents.interview.core.background import start_and_conduct_interview_task
 from app.core.exceptions import (
@@ -42,9 +43,9 @@ async def start_google_meet_interview(
     logger.info(f"Starting interview for role: {job_role}")
     
     services = get_services()
+    concurrency_limiter = get_concurrency_limiter()
     
     # === CONCURRENCY CHECK ===
-    concurrency_limiter = get_concurrency_limiter()
     if concurrency_limiter:
         # Pre-check: Generate a temporary session ID for concurrency tracking
         # The actual session_id will be created later, but we check capacity first
@@ -110,6 +111,8 @@ async def start_google_meet_interview(
             raise ValidationError("questionnaire_json", f"Invalid format: {str(e)}")
 
     # 3. Create session
+    session_id: Optional[str] = None
+    slot_acquired = False
     try:
         session_id = services.interview_service.start_new_interview(
             resume_text=resume_content,
@@ -124,6 +127,17 @@ async def start_google_meet_interview(
 
     # 4. Schedule background task
     try:
+        if concurrency_limiter and session_id:
+            slot_acquired = concurrency_limiter.try_acquire(session_id)
+            if not slot_acquired:
+                services.interview_service.end_interview_session(session_id)
+                services.db_handler.update_session_status(session_id, SessionStatus.ERROR_CAPACITY_REACHED)
+                raise HTTPException(
+                    status_code=503,
+                    detail="Server reached interview capacity. Please try again later.",
+                    headers={"Retry-After": "60"}
+                )
+
         background_tasks.add_task(
             start_and_conduct_interview_task,
             session_id=session_id,
@@ -136,12 +150,21 @@ async def start_google_meet_interview(
             resume_content=resume_content
         )
         
-        services.db_handler.update_session_status(session_id, "active_scheduled")
+        services.db_handler.update_session_status(session_id, SessionStatus.ACTIVE_SCHEDULED)
     except Exception as e:
+        if session_id:
+            try:
+                services.interview_service.end_interview_session(session_id)
+            except Exception:
+                logger.warning(f"Failed to finalize unscheduled session {session_id}", exc_info=True)
+        if concurrency_limiter and slot_acquired and session_id:
+            concurrency_limiter.release(session_id)
         logger.error(f"Failed to schedule interview task: {e}", exc_info=True)
+        if isinstance(e, HTTPException):
+            raise
         raise InterviewExecutionError(session_id, "task_scheduling", str(e))
     
-    return {"status": "pending", "session_id": session_id}
+    return {"status": SessionStatus.PENDING, "session_id": session_id}
 
 @router.get("/{session_id}/status")
 @limiter.limit(RATE_LIMITS["get_status"])
@@ -181,7 +204,7 @@ async def get_interview_status(request: Request, response: Response, session_id:
 
 @router.post("/{session_id}/end")
 async def end_interview(session_id: str):
-    """Manually end an active interview session (No rate limit - always allow termination)"""
+    """Request an active interview session to stop and let background cleanup finalize it."""
     logger.info(f"Received request to end session: {session_id}")
     
     services = get_services()
@@ -194,8 +217,8 @@ async def end_interview(session_id: str):
         raise HTTPException(status_code=404, detail="Session not found")
     
     try:
-        services.meet_session_mgr.end_session(session_id)
-        return {"status": "ended", "session_id": session_id}
+        services.meet_session_mgr.request_session_stop(session_id)
+        return {"status": "ending", "session_id": session_id}
     except Exception as e:
         logger.error(f"Failed to end session {session_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))

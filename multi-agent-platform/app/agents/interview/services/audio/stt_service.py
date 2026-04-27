@@ -37,8 +37,8 @@ from app.agents.interview.infrastructure.selenium.meet_session_manager import Me
 from app.agents.interview.core.ports.session_repository import SessionRepository
 from app.agents.interview.utils.audio_file_utils import get_user_audio_path_for_stt, save_audio_file
 
-from app.agents.interview.config.settings import Config
 from app.agents.interview.config.constants import AudioConfig, ServiceConfig
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ class STTService:
     ):
         self.session_mgr = session_manager
         self.db_handler = db_handler
-        self.api_version = Config.SPEECH_API_VERSION
+        self.api_version = settings.SPEECH_API_VERSION
 
         if self.api_version not in ["v1", "v2"]:
             logger.error(f"Invalid API version: {self.api_version}, defaulting to v2")
@@ -65,22 +65,34 @@ class STTService:
             self._init_v1_client()
         
         self.virtual_input = self._find_recording_device()
-        self.samplerate = AudioConfig.SAMPLE_RATE_24K
+        if not getattr(self, 'samplerate', None):
+            self.samplerate = AudioConfig.SAMPLE_RATE_24K
 
     def _find_recording_device(self) -> Optional[int]:
         try:
+            target_name = AudioConfig.RECORDING_DEVICE_NAME.lower()
             devices = sd.query_devices()
-            device_index = next(
-                (d['index'] for d in devices
-                 if AudioConfig.RECORDING_DEVICE_NAME in d['name']
-                 and d['max_input_channels'] > 0),
-                None
-            )
-            if device_index is not None:
-                logger.info(f"[STTService] Found VB-Audio Recording: {device_index}")
-            else:
-                logger.warning("[STTService] VB-Audio Recording device not found")
-            return device_index
+            preferred_hostapis = ['Windows WASAPI', 'Windows DirectSound', 'MME']
+            
+            for api in preferred_hostapis:
+                for d in devices:
+                    if d['max_input_channels'] > 0 and target_name in d['name'].lower():
+                        host_api_name = sd.query_hostapis(d['hostapi'])['name']
+                        if host_api_name == api:
+                            logger.info(f"[STTService] Found preferred VB-Audio Recording [{api}]: {d['index']}")
+                            import sounddevice as sd_internal
+                            self.samplerate = int(d['default_samplerate'])
+                            return d['index']
+            
+            # Fallback pass
+            for d in devices:
+                if d['max_input_channels'] > 0 and target_name in d['name'].lower():
+                    logger.info(f"[STTService] Found fallback VB-Audio Recording: {d['index']}")
+                    self.samplerate = int(d['default_samplerate'])
+                    return d['index']
+            
+            logger.warning("[STTService] VB-Audio Recording device not found")
+            return None
         except Exception as e:
             logger.error(f"Error finding STT audio device: {e}")
             return None
@@ -96,8 +108,8 @@ class STTService:
     def _init_v2_client(self):
         if not V2_AVAILABLE: return
         try:
-            self.project_id = Config.get_google_cloud_project()
-            self.location = Config.GOOGLE_CLOUD_REGION
+            self.project_id = settings.GOOGLE_CLOUD_PROJECT
+            self.location = settings.GOOGLE_CLOUD_REGION
             api_endpoint = f"{self.location}-speech.googleapis.com"
             keepalive_options = [
                 ('grpc.keepalive_time_ms', ServiceConfig.GRPC_KEEPALIVE_TIME_MS),
@@ -180,7 +192,23 @@ class STTService:
                     logger.error(f"STT V1 processing error: {e}")
                     if not transcript_parts: transcript_parts.append("[Speech service error]")
             
-            stream = sd.InputStream(samplerate=self.samplerate, device=input_device, channels=1, callback=audio_callback, dtype='float32')
+            try:
+                stream = sd.InputStream(
+                    samplerate=self.samplerate, 
+                    device=input_device, 
+                    channels=1, 
+                    callback=audio_callback, 
+                    dtype='float32'
+                )
+            except sd.PortAudioError as e:
+                logger.error(f"[STT V1] PortAudio fallback to system default due to: {e}")
+                stream = sd.InputStream(
+                    samplerate=16000, 
+                    channels=1, 
+                    callback=audio_callback, 
+                    dtype='float32'
+                )
+
             stream.start()
             recording_start = datetime.now()
             stt_thread = threading.Thread(target=stt_processor, daemon=True); stt_thread.start()
@@ -188,7 +216,12 @@ class STTService:
             stream.stop(); stream.close(); audio_queue.put(None); stt_thread.join(timeout=10)
             
             if recorded_chunks:
-                self._save_recorded_audio(recorded_chunks, session_id, turn_count, candidate_id, is_follow_up)
+                save_thread = threading.Thread(
+                    target=self._save_recorded_audio,
+                    args=(recorded_chunks, session_id, turn_count, candidate_id, is_follow_up),
+                    daemon=True
+                )
+                save_thread.start()
             
             final_transcript = " ".join(transcript_parts).strip()
             return recording_start, final_transcript if final_transcript else "[No response]"
@@ -226,7 +259,16 @@ class STTService:
                     language_codes=[ServiceConfig.STT_LANGUAGE_CODE], model=ServiceConfig.STT_MODEL_V2,
                     features=cloud_speech.RecognitionFeatures(enable_automatic_punctuation=True)
                 )
-                yield cloud_speech.StreamingRecognizeRequest(recognizer=self.recognizer, streaming_config=cloud_speech.StreamingRecognitionConfig(config=config, streaming_features=cloud_speech.StreamingRecognitionFeatures(interim_results=True)))
+                yield cloud_speech.StreamingRecognizeRequest(
+                    recognizer=self.recognizer, 
+                    streaming_config=cloud_speech.StreamingRecognitionConfig(
+                        config=config, 
+                        streaming_features=cloud_speech.StreamingRecognitionFeatures(
+                            interim_results=True,
+                            enable_voice_activity_events=True
+                        )
+                    )
+                )
                 while True:
                     chunk = audio_queue.get()
                     if chunk is None: break
@@ -248,17 +290,43 @@ class STTService:
                                     transcript_parts.append(result.alternatives[0].transcript)
                 except Exception: pass
 
-            stream = sd.InputStream(samplerate=self.samplerate, device=input_device, channels=1, callback=audio_callback, dtype='float32')
+            try:
+                stream = sd.InputStream(
+                    samplerate=self.samplerate, 
+                    device=input_device, 
+                    channels=1, 
+                    callback=audio_callback, 
+                    dtype='float32'
+                )
+            except sd.PortAudioError as e:
+                logger.error(f"[STT] PortAudio fallback to system default due to: {e}")
+                # Fallback to absolute default without specifying device index
+                stream = sd.InputStream(
+                    samplerate=16000, 
+                    channels=1, 
+                    callback=audio_callback, 
+                    dtype='float32'
+                )
+                
             stream.start()
             recording_start = datetime.now()
+            logger.info(f"STT: Recording started (device={input_device}, turn={turn_count})")
             stt_thread = threading.Thread(target=stt_processor, daemon=True); stt_thread.start()
             self._monitor_recording(recorded_chunks, session, stop_event, recording_start)
             stream.stop(); stream.close(); audio_queue.put(None); stt_thread.join(timeout=10)
             
+            recording_duration = (datetime.now() - recording_start).total_seconds()
+            
             if recorded_chunks:
-                self._save_recorded_audio(recorded_chunks, session_id, turn_count, candidate_id, is_follow_up)
+                save_thread = threading.Thread(
+                    target=self._save_recorded_audio,
+                    args=(recorded_chunks, session_id, turn_count, candidate_id, is_follow_up),
+                    daemon=True
+                )
+                save_thread.start()
             
             final_transcript = " ".join(transcript_parts).strip()
+            logger.info(f"STT: Recording finished ({recording_duration:.1f}s, chunks={len(recorded_chunks)}) → '{final_transcript[:80] if final_transcript else '[No response]'}'")
             return recording_start, final_transcript if final_transcript else "[No response]"
         except Exception as e:
             logger.error(f"V2 error: {e}"); return None, "[Error]"
@@ -269,14 +337,20 @@ class STTService:
     def _monitor_recording(self, recorded_chunks, session, stop_event, recording_start):
         speech_detected = False
         silence_start_time = None
+        speech_start_time = None  # Track when above-threshold audio started
         
         # Simple fixed thresholds
         MAX_DURATION_SEC = AudioConfig.MAX_RECORDING_DURATION_SEC
         SILENCE_THRESHOLD = AudioConfig.SILENCE_THRESHOLD_SEC
         MIN_RECORDING = AudioConfig.MIN_RECORDING_SEC
         VOLUME_THRESHOLD = AudioConfig.VOLUME_THRESHOLD
+        MIN_SPEECH_DURATION = AudioConfig.MIN_SPEECH_DURATION_SEC  # Must speak for this long before silence can stop
+        
+        log_interval = 0
         
         while True:
+            time.sleep(0.05)  # 50ms poll interval (was outside loop - bug)
+            
             # 1. Safety Checks
             if not session or (stop_event and stop_event.is_set()): break
             if not self._is_candidate_present(session): break
@@ -292,13 +366,28 @@ class STTService:
                 recent = np.concatenate(recorded_chunks[-5:], axis=0)
                 volume = np.sqrt(np.mean(recent**2))
                 
+                # Periodic debug logging (every ~2 seconds)
+                log_interval += 1
+                if log_interval % 40 == 0:
+                    logger.debug(f"STT Monitor: vol={volume:.6f} threshold={VOLUME_THRESHOLD} speech={speech_detected} elapsed={elapsed:.1f}s")
+                
                 if volume > VOLUME_THRESHOLD:
-                    # --- SPEECH DETECTED ---
-                    speech_detected = True
+                    # --- ABOVE THRESHOLD ---
                     silence_start_time = None  # Reset silence timer
+                    
+                    if not speech_detected:
+                        # Track how long we've been above threshold continuously
+                        if speech_start_time is None:
+                            speech_start_time = time.time()
+                        
+                        # Only mark as real speech after sustained above-threshold audio
+                        speech_duration = time.time() - speech_start_time
+                        if speech_duration >= MIN_SPEECH_DURATION:
+                            speech_detected = True
+                            logger.info(f"STT: Speech confirmed after {speech_duration:.2f}s of sustained audio (vol={volume:.4f})")
                 
                 elif speech_detected:
-                    # --- SILENCE AFTER SPEECH ---
+                    # --- SILENCE AFTER CONFIRMED SPEECH ---
                     if silence_start_time is None:
                         silence_start_time = time.time()
                     
@@ -308,8 +397,10 @@ class STTService:
                     if elapsed >= MIN_RECORDING and silence_duration > SILENCE_THRESHOLD:
                         logger.info(f"STT: Silence ({silence_duration:.2f}s) > {SILENCE_THRESHOLD}s. Stopping.")
                         break
+                else:
+                    # Below threshold and no speech yet - reset speech start timer
+                    speech_start_time = None
 
-            time.sleep(0.05)  # Poll frequency
 
     def _is_candidate_present(self, session: dict) -> bool:
         try:

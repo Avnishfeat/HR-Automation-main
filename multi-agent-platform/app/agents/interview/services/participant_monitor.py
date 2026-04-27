@@ -4,10 +4,9 @@ import logging
 import re
 import threading
 from typing import Optional, Callable
-from datetime import datetime
 from collections import Counter
 
-from app.config.constants import (
+from app.agents.interview.config.constants import (
     ParticipantThresholds,
     LoggingConfig
 )

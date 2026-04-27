@@ -9,6 +9,7 @@ from datetime import datetime
 
 # Updated imports to point to new locations
 from app.agents.interview.services.analysis.liveness_service import LivenessChallengeService
+from app.agents.interview.core.limiter import get_concurrency_limiter
 from app.agents.interview.infrastructure.selenium.meet_session_manager import MeetSessionManager
 from app.agents.interview.services.interview_service import InterviewService
 from app.agents.interview.services.audio.stt_service import STTService
@@ -110,6 +111,7 @@ class MeetInterviewOrchestrator:
         try:
             # Get session with ThreadSafe Proxy
             session = self._get_interview_session(session_id)
+            self._heartbeat_session(session_id)
             
             # Start monitoring
             self._start_participant_monitoring(session)
@@ -185,7 +187,7 @@ class MeetInterviewOrchestrator:
         
         while True:
             if session.stop_event.is_set():
-                if self.malpractice_processing.is_set():
+                if self.malpractice_handler.processing.is_set():
                     logger.info("Greeting aborted due to malpractice")
                 return False
 
@@ -200,7 +202,7 @@ class MeetInterviewOrchestrator:
             )
             
             if not success:
-                if session.stop_event.is_set() and self.malpractice_processing.is_set():
+                if session.stop_event.is_set() and self.malpractice_handler.processing.is_set():
                     logger.info("Greeting interrupted by malpractice detection")
                     return False
                 
@@ -212,6 +214,13 @@ class MeetInterviewOrchestrator:
                     else:
                         return False
                 return False
+            
+            # FIX: Disable mic after greeting so the VB-Audio cable is clean
+            # before STT recording starts in the introduction phase.
+            # Without this, residual bot audio on the cable triggers false
+            # speech detection followed by immediate silence cutoff.
+            await asyncio.to_thread(session.meet.disable_microphone)
+            await asyncio.sleep(0.5)  # Let the virtual cable drain
             
             self.state_mgr.update_turn_count(state, state.turn_count + 1)
             return True
@@ -229,17 +238,24 @@ class MeetInterviewOrchestrator:
             if response.transcript and response.transcript != "[No response]":
                 logger.info("Valid introduction received")
                 self.state_mgr.update_turn_count(state, response.turn_count + 1)
+                self.interview_svc.transcript_manager._update_transcript_immediate(
+                    session.session_id, response.transcript
+                )
                 self._log_transcript(session.session_id, response, session.candidate_id)
                 await asyncio.to_thread(session.meet.disable_microphone)
                 return True
             
-            logger.warning("Invalid intro. Reprompting...")
+            logger.warning(f"Invalid intro (attempt {attempt}/{InterviewTiming.MAX_INTRO_ATTEMPTS}). Reprompting...")
             self.state_mgr.update_turn_count(state, state.turn_count + 1)
             
             await asyncio.to_thread(session.meet.enable_microphone)
+            await asyncio.sleep(InterviewTiming.MIC_TOGGLE_DELAY_SEC)
             await self._play_text_with_cache(
                 StaticMessages.INTRO_REPROMPT, StaticMessages.CACHE_KEY_INTRO_REPROMPT, session, state.turn_count
             )
+            # FIX: Disable mic after reprompt playback, same reasoning as greeting
+            await asyncio.to_thread(session.meet.disable_microphone)
+            await asyncio.sleep(0.5)  # Let virtual cable drain
             self.state_mgr.update_turn_count(state, state.turn_count + 1)
 
         return True
@@ -256,6 +272,7 @@ class MeetInterviewOrchestrator:
         logger.info(f"Liveness check scheduled for turn {liveness_check_turn}")
         
         while True:
+            self._heartbeat_session(session.session_id)
             if await self._should_terminate(session, state, duration_seconds): 
                 break
             
@@ -269,9 +286,12 @@ class MeetInterviewOrchestrator:
             if not has_done_spot_check and state.turn_count >= liveness_check_turn:
                 should_trigger_spot_check = True
             
-            # Additional override for flagged integrity issues
+            # Additional override for flagged integrity issues (only if enough turns 
+            # have passed since last check to avoid back-to-back spot checks)
             if "fake_camera_frozen" in session.malpractice_flags:
-                should_trigger_spot_check = True
+                turns_since_last_check = state.turn_count - getattr(state, '_last_spot_check_turn', 0)
+                if turns_since_last_check >= 3:  # At least 3 turns between checks
+                    should_trigger_spot_check = True
 
             if should_trigger_spot_check:
                 logger.info(f"Triggering Liveness Spot Check at Turn {state.turn_count} (scheduled for {liveness_check_turn})...")
@@ -283,6 +303,7 @@ class MeetInterviewOrchestrator:
                     return {'status': 'terminated_liveness_fail', 'transcript_log': transcript_log}
                 
                 has_done_spot_check = True
+                state._last_spot_check_turn = state.turn_count
                 session.malpractice_flags.clear() 
 
             # Run integrity check in background (don't block conversation)
@@ -317,16 +338,15 @@ class MeetInterviewOrchestrator:
                 continue
 
             if result.final_response.transcript and result.final_response.transcript != "[No response]":
+                self.interview_svc.transcript_manager._update_transcript_immediate(
+                    session.session_id, result.final_response.transcript
+                )
                 self._log_transcript(session.session_id, result.final_response, session.candidate_id)
                 transcript_log.append({
                     "role": "user", 
                     "content": result.final_response.transcript,
                     "turn": result.final_response.turn_count
                 })
-                self.interview_svc.transcript_manager._update_transcript_immediate(
-                    session.session_id, result.final_response.transcript
-                )
-                await asyncio.sleep(InterviewTiming.TRANSCRIPT_PROPAGATION_DELAY_SEC)
 
         return {'transcript_log': transcript_log}
 
@@ -407,6 +427,12 @@ class MeetInterviewOrchestrator:
         success = await asyncio.to_thread(
             self.audio_handler.play_audio_stream, audio_stream, session.meet, session.stop_event
         )
+        
+        # FIX: Disable mic after question playback so the VB-Audio cable is
+        # clean before STT recording captures the candidate's response.
+        await asyncio.to_thread(session.meet.disable_microphone)
+        await asyncio.sleep(0.3)  # Let virtual cable drain
+        
         return success, turn_count + 1, duration
 
     async def _handle_generation_delay_or_failure(
@@ -501,6 +527,7 @@ class MeetInterviewOrchestrator:
 
         start_time = time.time()
         while time.time() - start_time < MAX_WAIT_SECONDS:
+            self._heartbeat_session(session.session_id)
             if session.stop_event.is_set(): return False
             try:
                 if session.meet.get_participant_count() >= 2:
@@ -533,6 +560,12 @@ class MeetInterviewOrchestrator:
         if self.participant_monitor:
             self.participant_monitor.stop_monitoring()
             self.participant_monitor = None
+
+    @staticmethod
+    def _heartbeat_session(session_id: str) -> None:
+        concurrency_limiter = get_concurrency_limiter()
+        if concurrency_limiter:
+            concurrency_limiter.heartbeat(session_id)
         
     def _build_final_response(self, session_id, state, logs):
         final_response = {

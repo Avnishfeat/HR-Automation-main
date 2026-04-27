@@ -28,20 +28,29 @@ class AudioHandler:
     def _find_playback_device(self) -> Optional[int]:
         """Discovers and configures the virtual audio output device."""
         try:
+            target_name = AudioConfig.PLAYBACK_DEVICE_NAME.lower()
             devices = sd.query_devices()
-            device_index = next(
-                (d['index'] for d in devices
-                 if AudioConfig.PLAYBACK_DEVICE_NAME in d['name'] 
-                 and d['max_output_channels'] > 0),
-                None
-            )
+            preferred_hostapis = ['Windows WASAPI', 'Windows DirectSound', 'MME']
             
-            if device_index is not None:
-                logger.info(f"[AudioHandler] Found VB-Audio Playback: {device_index}")
-            else:
-                logger.warning("[AudioHandler] VB-Audio Playback device not found")
+            # First pass: look for exact device match with preferred APIs
+            for api in preferred_hostapis:
+                for d in devices:
+                    if d['max_output_channels'] > 0 and target_name in d['name'].lower():
+                        host_api_name = sd.query_hostapis(d['hostapi'])['name']
+                        if host_api_name == api:
+                            logger.info(f"[AudioHandler] Found preferred VB-Audio Playback [{api}]: {d['index']}")
+                            self.target_samplerate = int(d['default_samplerate'])
+                            return d['index']
             
-            return device_index
+            # Second pass: Any matching device regardless of API
+            for d in devices:
+                if d['max_output_channels'] > 0 and target_name in d['name'].lower():
+                    logger.info(f"[AudioHandler] Found fallback VB-Audio Playback: {d['index']}")
+                    self.target_samplerate = int(d['default_samplerate'])
+                    return d['index']
+            
+            logger.warning("[AudioHandler] VB-Audio Playback device not found. Using system default.")
+            return None
             
         except Exception as e:
             logger.error(f"Error finding playback audio device: {e}")
@@ -59,28 +68,23 @@ class AudioHandler:
     ) -> bool:
         """
         Play MULAW audio stream from an iterator (e.g., Google TTS stream).
-        
-        Args:
-            audio_chunk_iterator: Iterator yielding MULAW audio chunks
-            meet: Meet controller for participant monitoring
-            stop_event: Event to signal early termination
-            
-        Returns:
-            True if playback completed successfully, False if interrupted
         """
         logger.debug("Starting MULAW stream playback")
         
         def feeder_func(audio_queue: queue.Queue, finished: threading.Event):
             """Feeds decoded audio chunks into queue."""
+            state = None
             try:
                 for chunk_bytes in audio_chunk_iterator:
-                    #  Check stop event BEFORE processing each chunk
                     if stop_event.is_set() or finished.is_set():
-                        logger.debug("Feeder stopped by event")
                         break
                     
                     # Decode MULAW to Linear PCM
                     linear_audio = audioop.ulaw2lin(chunk_bytes, 2)
+
+                    # Resample via audioop to the target hardware frequency
+                    if self.target_samplerate != 24000:
+                        linear_audio, state = audioop.ratecv(linear_audio, 2, 1, 24000, self.target_samplerate, state)
                     
                     # Convert to float32 for sounddevice
                     audio_data = np.frombuffer(
@@ -89,13 +93,12 @@ class AudioHandler:
                     
                     if len(audio_data) > 0:
                         audio_queue.put(audio_data)
-                        
             except Exception as e:
                 logger.error(f"Audio feeder error: {e}", exc_info=True)
             finally:
-                audio_queue.put(None)  # Signal end
-        
-        return self._execute_playback(feeder_func, meet, stop_event)
+                audio_queue.put(None)
+                
+        return self._execute_playback(feeder_func, meet, stop_event, samplerate=self.target_samplerate)
 
     def play_wav_file(
         self,
@@ -121,15 +124,27 @@ class AudioHandler:
         
         logger.info(f"Playing cached audio: {Path(file_path).name}")
         
+        # Read file using soundfile at the top-level to get real sampling rate
+        try:
+            _, fs = sf.read(str(file_path), frames=64, dtype='float32')
+        except Exception:
+            fs = self.target_samplerate
+
         def feeder_func(audio_queue: queue.Queue, finished: threading.Event):
             """Feeds audio file chunks into queue."""
             try:
-                # Read file using soundfile (returns float32 by default)
-                data, fs = sf.read(str(file_path), dtype='float32')
+                # Read entire file using soundfile
+                data, _ = sf.read(str(file_path), dtype='float32')
                 
                 # Ensure mono
                 if len(data.shape) > 1:
                     data = data.mean(axis=1)
+
+                import scipy.signal
+                if fs != self.target_samplerate:
+                    num_samples = int(len(data) * float(self.target_samplerate) / fs)
+                    if num_samples > 0:
+                        data = scipy.signal.resample(data, num_samples).astype(np.float32)
                 
                 #  Feed in smaller chunks for faster interruption response
                 # Smaller chunks = more frequent stop_event checks
@@ -149,13 +164,13 @@ class AudioHandler:
             finally:
                 audio_queue.put(None)  # Signal end
         
-        return self._execute_playback(feeder_func, meet, stop_event)
+        return self._execute_playback(feeder_func, meet, stop_event, samplerate=self.target_samplerate)
 
     # =========================================================================
     # CORE PLAYBACK ENGINE (Unified Logic)
     # =========================================================================
 
-    def _execute_playback(self, feeder_func: Callable[[queue.Queue, threading.Event], None], meet: MeetController, stop_event: threading.Event) -> bool:
+    def _execute_playback(self, feeder_func: Callable[[queue.Queue, threading.Event], None], meet: MeetController, stop_event: threading.Event, samplerate: Optional[int] = None) -> bool:
         audio_queue: queue.Queue = queue.Queue(maxsize=100)
         stream_finished = threading.Event()
         internal_buffer = np.array([], dtype=np.float32)
@@ -221,7 +236,7 @@ class AudioHandler:
             
             # Create output stream
             stream = sd.OutputStream(
-                samplerate=self.target_samplerate,
+                samplerate=samplerate or self.target_samplerate,
                 device=output_device,
                 channels=1,
                 dtype='float32',

@@ -20,7 +20,8 @@ from app.agents.interview.config.constants import (
     ParticipantThresholds, 
     InterviewTiming, 
     BrowserConfig,
-    StoragePaths
+    StoragePaths,
+    SessionStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -518,6 +519,24 @@ class MeetSessionManager:
 
         except Exception as e:
             logger.error(f"Error ending session {session_id}: {e}", exc_info=True)
+
+    def request_session_stop(self, session_id: str) -> bool:
+        """Signal a running session to stop and let the background task finalize cleanup."""
+        session = self.active_sessions.get(session_id)
+        if not session:
+            return False
+
+        stop_event = session.get('stop_interview')
+        if stop_event and not stop_event.is_set():
+            stop_event.set()
+            logger.info(f"Stop requested for session {session_id}")
+
+        capture_stop = session.get('stop_capture')
+        if capture_stop and not capture_stop.is_set():
+            capture_stop.set()
+
+        session['status'] = SessionStatus.STOP_REQUESTED
+        return True
 
     def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         return self.active_sessions.get(session_id)

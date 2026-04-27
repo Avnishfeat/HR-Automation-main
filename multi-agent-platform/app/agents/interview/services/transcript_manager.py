@@ -3,7 +3,8 @@ import logging
 from datetime import datetime
 from typing import Optional, Dict
 import threading
-from app.core.ports.session_repository import SessionRepository
+
+from app.agents.interview.core.ports.session_repository import SessionRepository
 
 logger = logging.getLogger(__name__)
 

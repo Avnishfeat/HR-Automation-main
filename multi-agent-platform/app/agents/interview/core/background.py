@@ -6,6 +6,8 @@ from datetime import datetime
 from typing import Optional
 import concurrent.futures
 
+from app.agents.interview.config.constants import SessionStatus, BrowserConfig
+from app.agents.interview.core.limiter import get_concurrency_limiter
 from app.agents.interview.core.startup import get_services
 from app.core.exceptions import (ServiceInitializationError, MeetConnectionError, InterviewExecutionError)
 from app.agents.interview.models.analysis_schemas import CombinedAnalysisReport
@@ -44,10 +46,13 @@ def start_and_conduct_interview_task(
     interview_service = services.interview_service
     combined_analyzer = services.combined_analyzer
     transcript_analyzer = services.transcript_analyzer
+    concurrency_limiter = get_concurrency_limiter()
 
     
     final_status = "error_unknown"
     snapshot_count = 0
+    session_closed = False
+    session_finalized = False
 
     try:
         # Check services...
@@ -57,18 +62,35 @@ def start_and_conduct_interview_task(
         # 1. Start Bot
         success = meet_session_mgr.start_bot_session(
             session_id, meet_link, candidate_id, audio_device,
-            enable_video, True, video_capture_method
+            enable_video, BrowserConfig.HEADLESS, video_capture_method
         )
         if not success:
-            db_handler.update_session_status(session_id, "error_join_failed")
+            db_handler.update_session_status(session_id, SessionStatus.ERROR_JOIN_FAILED)
             raise MeetConnectionError(session_id, "Bot join failed")
+
+        if concurrency_limiter:
+            concurrency_limiter.heartbeat(session_id)
 
         # 2. Wait for Candidate
         if not meet_session_mgr.wait_for_candidate(session_id, timeout=300):
-            db_handler.update_session_status(session_id, "error_candidate_no_show")
+            active_session = meet_session_mgr.get_session(session_id) if meet_session_mgr else None
+            stop_requested = bool(
+                active_session
+                and active_session.get("stop_interview")
+                and active_session["stop_interview"].is_set()
+            )
+            if stop_requested:
+                logger.info(f"[Task: {session_id}] Stop requested before candidate joined")
+                final_status = SessionStatus.COMPLETED_NO_ANALYSIS
+                db_handler.update_session_status(session_id, SessionStatus.COMPLETED_NO_ANALYSIS)
+                return
+
+            db_handler.update_session_status(session_id, SessionStatus.ERROR_CANDIDATE_NO_SHOW)
             raise InterviewExecutionError(session_id, "wait", "Candidate no-show")
 
-        db_handler.update_session_status(session_id, "active_interviewing")
+        db_handler.update_session_status(session_id, SessionStatus.ACTIVE_INTERVIEWING)
+        if concurrency_limiter:
+            concurrency_limiter.heartbeat(session_id)
 
         # 3. Video Capture
         if enable_video:
@@ -109,11 +131,13 @@ def start_and_conduct_interview_task(
         
         if meet_session_mgr:
             meet_session_mgr.end_session(session_id)
+            session_closed = True
             
         if interview_service:
             interview_service.end_interview_session(session_id)
+            session_finalized = True
 
-        db_handler.update_session_status(session_id, "active_analyzing")
+        db_handler.update_session_status(session_id, SessionStatus.ACTIVE_ANALYZING)
 
         # 6. Retrieve Transcript (FROM DB)
         transcript_content = db_handler.get_transcript_text(session_id)
@@ -169,21 +193,35 @@ def start_and_conduct_interview_task(
             
             if combined_report:
                 logger.info(f"[Task: {session_id}] Analysis completed and saved by Analyzer.")
-                db_handler.update_session_status(session_id, "completed")
+                db_handler.update_session_status(session_id, SessionStatus.COMPLETED)
             else:
                 logger.error(f"[Task: {session_id}] CombinedAnalyzer returned None.")
-                db_handler.update_session_status(session_id, "error_analysis_empty")
+                db_handler.update_session_status(session_id, SessionStatus.ERROR_ANALYSIS_EMPTY)
 
         except Exception as e:
             logger.error(f"[Task: {session_id}] Combine failed: {e}", exc_info=True)
-            db_handler.update_session_status(session_id, "error_analysis_failed")
+            db_handler.update_session_status(session_id, SessionStatus.ERROR_ANALYSIS_FAILED)
 
     except Exception as e:
         logger.error(f"FATAL ERROR [Task: {session_id}]: {e}", exc_info=True)
         if db_handler:
-            db_handler.update_session_status(session_id, "error_fatal")
+            db_handler.update_session_status(session_id, SessionStatus.ERROR_FATAL_TASK)
     finally:
         # Emergency Cleanup
         try:
-            if meet_session_mgr: meet_session_mgr.end_session(session_id)
-        except: pass
+            if meet_session_mgr and not session_closed:
+                meet_session_mgr.end_session(session_id)
+        except Exception:
+            logger.warning(f"[Task: {session_id}] Emergency session cleanup failed", exc_info=True)
+
+        try:
+            if interview_service and not session_finalized:
+                interview_service.end_interview_session(session_id)
+        except Exception:
+            logger.warning(f"[Task: {session_id}] Emergency interview finalization failed", exc_info=True)
+
+        try:
+            if concurrency_limiter:
+                concurrency_limiter.release(session_id)
+        except Exception:
+            logger.warning(f"[Task: {session_id}] Failed to release concurrency slot", exc_info=True)

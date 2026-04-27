@@ -25,133 +25,56 @@ class InterviewResponseHandler:
     ) -> HandlerResult:
         
         transcript = response.transcript.strip()
+        state.last_user_transcript = transcript or None
         
-        # 1. Handle Empty/Silence immediately
+        # 1. Handle empty/silence immediately
         if not transcript or transcript == "[No response]":
             return await self._handle_no_response(session, state, response, record_next_callback)
 
-        # 2. Classify Intent using Gemini (Semantic Understanding)
-        intent = await self._classify_intent_with_gemini(transcript)
-        logger.info(f" Detected Intent: {intent} | Text: '{transcript[:50]}...'")
+        # 2. Keep only a tiny local exit heuristic so interview termination
+        # stays deterministic, while repeat/clarification are handled by the
+        # main Gemini interview prompt on the next turn.
+        if state.exit_confirmation_pending:
+            if self._looks_like_exit_confirmation(transcript):
+                return await self._confirm_exit(session, state, response)
 
-        # 3. Route based on Intent
-        if intent == "EXIT":
-            return await self._handle_exit_flow(session, state, response, record_next_callback)
-            
-        elif intent == "REPEAT":
-            return await self._handle_repeat(session, state, response, record_next_callback)
-            
-        elif intent == "CLARIFICATION":
-            return await self._handle_clarification(session, state, response, record_next_callback)
+            if self._looks_like_exit_cancellation(transcript):
+                logger.info("Exit request cancelled by candidate")
+                state.exit_confirmation_pending = False
+                return HandlerResult(final_response=response, proceed=True)
 
-        # 4. Default: Treat as a valid ANSWER (Happy Path)
+        if self._looks_like_exit_request(transcript):
+            logger.info("Exit request detected; main prompt will ask for confirmation")
+            state.exit_confirmation_pending = True
+            return HandlerResult(final_response=response, proceed=True)
+
+        # 3. Default: treat as a normal answer or control request that the
+        # main interview prompt can respond to directly.
         return HandlerResult(final_response=response, proceed=True)
 
     # =========================================================================
-    # INTENT CLASSIFIER (Fixed for New GenAI SDK)
+    # CONTROL FLOW HANDLERS
     # =========================================================================
 
-    async def _classify_intent_with_gemini(self, text: str) -> str:
-        """
-        Uses Gemini to classify intent into strict categories.
-        Returns: ANSWER, EXIT, REPEAT, CLARIFICATION
-        """
-        try:
-            prompt = (
-                f"Analyze this candidate response from an interview: '{text}'.\n"
-                "Classify the intent into exactly one of these categories:\n"
-                "- EXIT (The user explicitly wants to end/stop/quit the interview)\n"
-                "- REPEAT (The user missed what was said and wants it repeated)\n"
-                "- CLARIFICATION (The user doesn't understand the question)\n"
-                "- ANSWER (The user is answering the question, negotiating, or asking about logistics)\n"
-                "Return ONLY the category name. No other text."
-            )
-            
-            # FIX: Handle New Google GenAI SDK Structure
-            gemini_svc = self.interview_svc.gemini_service
-            
-            # 1. Get the Client (New SDK usually puts it in .client)
-            client = getattr(gemini_svc, 'client', None)
-            if not client:
-                logger.warning("Gemini Client not found in service. Defaulting to ANSWER.")
-                return "ANSWER"
-
-            # 2. Get Model Name (or default to flash)
-            model_id = getattr(gemini_svc, 'model_name', 'gemini-2.5-flash')
-
-            # 3. Call the API using the new signature
-            # client.models.generate_content(model=..., contents=...)
-            response = await asyncio.to_thread(
-                client.models.generate_content,
-                model=model_id,
-                contents=prompt
-            )
-            
-            if not response or not response.text:
-                return "ANSWER"
-
-            intent = response.text.strip().upper()
-            
-            # Safety check to ensure we get a valid category
-            valid_intents = ["EXIT", "REPEAT", "CLARIFICATION", "ANSWER"]
-            for v in valid_intents:
-                if v in intent: 
-                    return v
-            
-            return "ANSWER"
-            
-        except Exception as e:
-            logger.error(f"Intent classification failed: {e}")
-            return "ANSWER" # Fail-safe: continue interview
-
-    # =========================================================================
-    # CONTROL FLOW HANDLERS (Unchanged)
-    # =========================================================================
-
-    async def _handle_exit_flow(self, session, state, original_response, record_callback) -> HandlerResult:
-        logger.warning("Exit intent trigger. Asking for confirmation...")
-        
-        await self._play_audio(session, StaticMessages.EXIT_REDIRECT, StaticMessages.CACHE_KEY_WARNING_EXIT)
-        
-        confirmation_response = await record_callback(session, state.turn_count, True)
-        confirm_text = confirmation_response.transcript.lower().strip()
-        
-        is_confirmed = any(word in confirm_text for word in ['yes', 'yeah', 'stop', 'end', 'quit', 'sure', 'terminate', 'confirm'])
-        
-        if is_confirmed:
-             logger.info(f"User confirmed exit: '{confirm_text}'. Ending session.")
-             return HandlerResult(final_response=confirmation_response, proceed=False)
-        
-        logger.info(f"User cancelled exit: '{confirm_text}'. Resuming interview.")
-        
-        # 1. Play Acknowledgement
-        await self._play_audio(session, "Okay, let's continue.", "system_resume_ack")
-        
-        # FIX: Add a pause to let the audio finish and connections close
-        await asyncio.sleep(1.5) 
-        
-        # 2. Replay the Question
-        await self._replay_last_question(session, state)
-        
-        final_response = await record_callback(session, state.turn_count + 1, False)
-        return HandlerResult(final_response=final_response, proceed=True)
-
-    async def _handle_clarification(self, session, state, original, record_callback) -> HandlerResult:
-        logger.info("Clarification request")
-        await self._replay_last_question(session, state)
-        new_response = await record_callback(session, state.turn_count + 1, False)
-        return HandlerResult(final_response=new_response, proceed=True)
-
-    async def _handle_repeat(self, session, state, original, record_callback) -> HandlerResult:
-        logger.info("Repeat request")
-        await self._replay_last_question(session, state)
-        new_response = await record_callback(session, state.turn_count + 1, False)
-        return HandlerResult(final_response=new_response, proceed=True)
+    async def _confirm_exit(self, session, state, response) -> HandlerResult:
+        logger.info("Exit confirmed by candidate. Ending interview.")
+        state.exit_confirmation_pending = False
+        await self._play_audio(
+            session,
+            StaticMessages.OUTRO_MESSAGE,
+            StaticMessages.CACHE_KEY_OUTRO,
+        )
+        session.stop_event.set()
+        return HandlerResult(final_response=response, proceed=False)
 
     async def _handle_no_response(self, session, state, original, record_callback) -> HandlerResult:
         logger.warning("No response detected")
         await self._play_audio(session, StaticMessages.NO_RESPONSE, StaticMessages.CACHE_KEY_ERROR_NO_RESPONSE)
         await self._replay_last_question(session, state)
+        # FIX: Disable mic after replaying the question so the VB-Audio cable
+        # is clean before STT recording captures the candidate's retry response.
+        await asyncio.to_thread(session.meet.disable_microphone)
+        await asyncio.sleep(0.3)  # Let virtual cable drain
         new_response = await record_callback(session, state.turn_count + 1, False)
         return HandlerResult(final_response=new_response, proceed=True)
 
@@ -177,3 +100,64 @@ class InterviewResponseHandler:
         )
         if stream:
             await asyncio.to_thread(self.audio_handler.play_audio_stream, stream, session.meet, session.stop_event)
+
+    @staticmethod
+    def _looks_like_exit_request(transcript: str) -> bool:
+        text = transcript.lower()
+        exit_phrases = (
+            "end the interview",
+            "stop the interview",
+            "quit the interview",
+            "leave the interview",
+            "end this interview",
+            "stop this interview",
+            "quit this interview",
+            "i want to end",
+            "i want to stop",
+            "i want to quit",
+            "can we stop",
+            "can we end",
+            "please stop",
+            "please end",
+            "terminate the interview",
+        )
+        return any(phrase in text for phrase in exit_phrases)
+
+    @staticmethod
+    def _looks_like_exit_confirmation(transcript: str) -> bool:
+        text = transcript.lower()
+        confirmations = (
+            "yes",
+            "yes please",
+            "yes end it",
+            "yes stop",
+            "please end it",
+            "please stop it",
+            "end it",
+            "stop it",
+            "quit",
+            "terminate",
+            "i want to leave",
+            "i want to stop",
+            "i want to end",
+            "end the interview",
+            "stop the interview",
+        )
+        return any(phrase in text for phrase in confirmations)
+
+    @staticmethod
+    def _looks_like_exit_cancellation(transcript: str) -> bool:
+        text = transcript.lower()
+        cancellations = (
+            "no",
+            "no thanks",
+            "not now",
+            "continue",
+            "keep going",
+            "let's continue",
+            "lets continue",
+            "go on",
+            "carry on",
+            "resume",
+        )
+        return any(phrase in text for phrase in cancellations)

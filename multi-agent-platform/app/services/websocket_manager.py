@@ -16,7 +16,7 @@ class WebSocketManager:
         if client_id not in self.active_connections:
             self.active_connections[client_id] = []
         self.active_connections[client_id].append(websocket)
-        logger.info(f"🔌 Client {client_id} connected")
+        logger.info(f" Client {client_id} connected")
     
     def disconnect(self, websocket: WebSocket, client_id: str):
         """Remove WebSocket connection"""
@@ -24,7 +24,7 @@ class WebSocketManager:
             self.active_connections[client_id].remove(websocket)
             if not self.active_connections[client_id]:
                 del self.active_connections[client_id]
-        logger.info(f"🔌 Client {client_id} disconnected")
+        logger.info(f" Client {client_id} disconnected")
     
     async def send_message(self, message: str, client_id: str):
         """Send message to specific client"""

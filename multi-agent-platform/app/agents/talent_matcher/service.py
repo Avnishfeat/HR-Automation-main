@@ -6,24 +6,27 @@ from app.agents.talent_matcher.loader import load_employees
 class TalentMatcherService:
     def __init__(self):
         """
-        Initializes the service, loads employee data, and pre-computes
-        all employee profile embeddings for performance.
+        Initializes the service shell.
+        Heavy model/data loading is deferred until first use so app startup
+        does not depend on external model downloads.
         """
-        # 1. Initialize the model
+        self.model = None
+        self.employees = None
+        self.employee_embeddings = None
+
+    def _ensure_initialized(self):
+        if self.model is not None and self.employees is not None and self.employee_embeddings is not None:
+            return
+
         self.model = SentenceTransformer("all-MiniLM-L6-v2")
         self.employees = load_employees("data/employees.jsonl")
-        
-        # 2. Pre-process employee data
+
         all_profile_texts = []
         for i, emp in enumerate(self.employees):
-            # Add a unique STRING ID to satisfy the response schema
             emp["Employee_ID"] = str(i + 1)
-            
-            # Combine relevant fields into a single string for embedding
             profile_text = f"{emp.get('title', '')} {', '.join(emp.get('skills', []))} {emp.get('Key_Credentials', '')}"
             all_profile_texts.append(profile_text)
 
-        # 3. Pre-compute all employee embeddings in a single batch operation (very fast)
         self.employee_embeddings = self.model.encode(all_profile_texts, show_progress_bar=False)
         print(" Employee profiles pre-computed successfully.")
 
@@ -90,6 +93,8 @@ class TalentMatcherService:
         """
         Matches employees to the job description from JD Agent.
         """
+        self._ensure_initialized()
+
         # Extract or use provided matching criteria
         required_degree = request.required_degree or self._extract_degree_from_jd(request.job_description)
         min_experience = request.min_years_experience if request.min_years_experience is not None else self._extract_experience_from_jd(request.job_description)
