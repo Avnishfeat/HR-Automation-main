@@ -288,10 +288,30 @@ class CombinedAnalyzer(BaseAnalyzer, FileUploadMixin):
         if self.db:
             try:
                 db_data = report.model_dump() if hasattr(report, 'model_dump') else report.dict()
-                self.db.save_analysis_result(session_id, db_data)
-                logger.info(f"Combined report saved to database for {session_id}")
+                
+                session_data = self.db.get_session(session_id)
+                webhook_url = session_data.get("webhook_url") if session_data else None
+                
+                if webhook_url:
+                    from app.utils.webhook_client import dispatch_webhook
+                    logger.info(f"Dispatching combined analysis report to webhook for {session_id}")
+                    payload = {
+                        "event": "analysis_completed",
+                        "session_id": session_id,
+                        "candidate_id": candidate_id,
+                        "analysis": db_data
+                    }
+                    success = dispatch_webhook(webhook_url, payload)
+                    if success:
+                        logger.info(f"Successfully dispatched combined report to webhook for {session_id}")
+                        self.db.update_session_status(session_id, "completed")
+                    else:
+                        logger.error(f"Failed to dispatch combined report to webhook for {session_id}")
+                else:
+                    self.db.save_analysis_result(session_id, db_data)
+                    logger.info(f"Combined report saved to database for {session_id}")
             except Exception as e:
-                logger.error(f"Failed to save combined report: {e}", exc_info=True)
+                logger.error(f"Failed to save or dispatch combined report: {e}", exc_info=True)
         
         return report
     

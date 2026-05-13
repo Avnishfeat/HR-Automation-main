@@ -11,6 +11,7 @@ from app.agents.interview.core.limiter import get_concurrency_limiter
 from app.agents.interview.core.startup import get_services
 from app.core.exceptions import (ServiceInitializationError, MeetConnectionError, InterviewExecutionError)
 from app.agents.interview.models.analysis_schemas import CombinedAnalysisReport
+from app.utils.webhook_client import dispatch_webhook
 
 logger = logging.getLogger(__name__)
 
@@ -206,6 +207,22 @@ def start_and_conduct_interview_task(
         logger.error(f"FATAL ERROR [Task: {session_id}]: {e}", exc_info=True)
         if db_handler:
             db_handler.update_session_status(session_id, SessionStatus.ERROR_FATAL_TASK)
+            
+            # --- Fallback Webhook for Errors ---
+            try:
+                session_data = db_handler.get_session(session_id)
+                webhook_url = session_data.get("webhook_url") if session_data else None
+                if webhook_url:
+                    error_payload = {
+                        "event": "error",
+                        "session_id": session_id,
+                        "error": str(e),
+                        "status": "failed"
+                    }
+                    logger.info(f"[Task: {session_id}] Dispatching error webhook to {webhook_url}")
+                    dispatch_webhook(webhook_url, error_payload)
+            except Exception as webhook_err:
+                logger.error(f"[Task: {session_id}] Failed to dispatch error webhook: {webhook_err}", exc_info=True)
     finally:
         # Emergency Cleanup
         try:

@@ -17,6 +17,7 @@ from app.agents.jd_agent.router import router as jd_router
 from app.agents.job_post_agent.router import router as job_post_agent_router
 from app.agents.question_generator.router import router as question_generator_router
 from app.agents.talent_matcher.router import router as talent_matcher_router
+from app.agents.resume_matcher.router import router as resume_matcher_router
 from app.core.config import settings
 from app.core.dependencies import get_websocket_manager
 from app.core.logging import setup_logging
@@ -69,6 +70,7 @@ app.include_router(jd_router, prefix="/api/v1/jd", tags=["Job Description Agent"
 app.include_router(criteria_router, prefix="/api/v1/criteria", tags=["Candidate Criteria Agent"])
 app.include_router(job_post_agent_router, prefix="/api/v1", tags=["Job Post Agent"])
 app.include_router(talent_matcher_router, prefix="/api/v1/talent_matcher", tags=["Talent Matcher Agent"])
+app.include_router(resume_matcher_router, prefix="/api/v1/resume_matcher", tags=["Resume Matcher Agent"])
 app.include_router(question_generator_router, prefix="/api/v1/question_generator", tags=["Question Generator Agent"])
 app.include_router(interview_router, prefix="/api/v1/interview", tags=["Interview Agent"])
 

@@ -32,7 +32,7 @@ cp config/.env.example .env
 uvicorn app.main:app --reload
 ```
 
-Visit http://localhost:8000/docs for API documentation
+Visit http://localhost:8048/docs for API documentation
 
 ## 📁 Project Structure
 

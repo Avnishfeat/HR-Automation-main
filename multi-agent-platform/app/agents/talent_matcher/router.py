@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from .schemas import JobRequest, TalentMatchApiResponse
 from .service import TalentMatcherService
 
-router = APIRouter(tags=["Talent Matcher"])
+router = APIRouter(tags=["Talent Matcher Agent"])
 service = TalentMatcherService()
 
 @router.post("/match-job", response_model=TalentMatchApiResponse, summary="Match Employees to Job Description")

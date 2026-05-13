@@ -37,6 +37,7 @@ async def start_google_meet_interview(
     job_role: str = Form(...),
     job_description: Optional[str] = Form(None),
     video_capture_method: str = Form("javascript"),
+    webhook_url: Optional[str] = Form(None),
     resume: UploadFile = File(...)
 ):
     """Start a new Google Meet interview session (Rate limited: 2/min, Concurrency limited)"""
@@ -119,7 +120,8 @@ async def start_google_meet_interview(
             candidate_id=candidate_id,
             job_role=job_role,
             questionnaire=questionnaire,
-            job_description=job_description
+            job_description=job_description,
+            webhook_url=webhook_url
         )
     except Exception as e:
         logger.error(f"Failed to create DB session: {e}", exc_info=True)

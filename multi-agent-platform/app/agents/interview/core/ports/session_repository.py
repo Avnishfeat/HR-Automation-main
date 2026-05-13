@@ -23,7 +23,7 @@ class SessionRepository(ABC):
 
     # --- Session Management ---
     @abstractmethod
-    def create_session(self, resume_text: str, candidate_id: str, job_role: str, questionnaire: List[str], job_description: Optional[str] = None) -> str:
+    def create_session(self, resume_text: str, candidate_id: str, job_role: str, questionnaire: List[str], job_description: Optional[str] = None, webhook_url: Optional[str] = None) -> str:
         pass
 
     @abstractmethod

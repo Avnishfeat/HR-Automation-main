@@ -77,8 +77,8 @@ class TranscriptManager:
 
     def save_final_transcript_to_db(self, session_id: str) -> bool:
         """
-        Generates the final formatted transcript string and saves it 
-        to the MongoDB session document (instead of a local file).
+        Generates the final formatted transcript string and dispatches via webhook
+        if a webhook_url is present, otherwise saves it to MongoDB.
         """
         try:
             session_data = self.db.get_full_session(session_id)
@@ -113,14 +113,32 @@ class TranscriptManager:
             
             full_text = "\n".join(lines)
             
-            # Save to DB
-            success = self.db.save_transcript_text(session_id, full_text)
-            if success:
-                logger.info(f"TranscriptManager: Saved formatted transcript to MongoDB for {session_id}")
-                return True
+            webhook_url = session_data.get("webhook_url")
+            if webhook_url:
+                from app.utils.webhook_client import dispatch_webhook
+                logger.info(f"TranscriptManager: Dispatching transcript to webhook for {session_id}")
+                payload = {
+                    "event": "transcript_completed",
+                    "session_id": session_id,
+                    "candidate_id": session_data.get('candidate_id', 'unknown'),
+                    "transcript": full_text
+                }
+                success = dispatch_webhook(webhook_url, payload)
+                if success:
+                    logger.info(f"TranscriptManager: Successfully dispatched transcript for {session_id}")
+                    return True
+                else:
+                    logger.error(f"TranscriptManager: Failed to dispatch transcript to webhook for {session_id}")
+                    return False
             else:
-                logger.error(f"TranscriptManager: Failed to save text to MongoDB")
-                return False
+                # Fallback to saving to DB
+                success = self.db.save_transcript_text(session_id, full_text)
+                if success:
+                    logger.info(f"TranscriptManager: Saved formatted transcript to MongoDB for {session_id}")
+                    return True
+                else:
+                    logger.error(f"TranscriptManager: Failed to save text to MongoDB")
+                    return False
                 
         except Exception as e: 
             logger.error(f"TranscriptManager: Generation failed: {e}", exc_info=True)

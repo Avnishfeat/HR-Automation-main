@@ -38,7 +38,8 @@ class InterviewService:
         candidate_id: str,
         job_role: str,
         questionnaire: List[str],
-        job_description: Optional[str] = None
+        job_description: Optional[str] = None,
+        webhook_url: Optional[str] = None
     ) -> str:
         
         session_id = self.db.create_session(
@@ -46,7 +47,8 @@ class InterviewService:
             candidate_id,
             job_role,
             questionnaire or [],
-            job_description
+            job_description,
+            webhook_url
         )
         
         candidate_name = self._extract_candidate_name(resume_text)

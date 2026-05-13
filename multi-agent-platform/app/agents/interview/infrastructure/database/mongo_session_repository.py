@@ -72,13 +72,14 @@ class MongoSessionRepository(SessionRepository):
             logger.error(f"Failed to list files with prefix {prefix}: {e}")
             return []
 
-    def create_session(self, resume_text: str, candidate_id: str, job_role: str, questionnaire: List[str], job_description: Optional[str] = None) -> str:
+    def create_session(self, resume_text: str, candidate_id: str, job_role: str, questionnaire: List[str], job_description: Optional[str] = None, webhook_url: Optional[str] = None) -> str:
         session_data = {
             "candidate_id": candidate_id, 
             "resume_text": resume_text,
             "job_role": job_role,
             "job_description": job_description,
             "questionnaire": questionnaire, 
+            "webhook_url": webhook_url,
             "created_at": datetime.now(),
             "status": "pending",
             "usage_tracking": {
