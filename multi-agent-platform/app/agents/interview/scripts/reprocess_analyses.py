@@ -1,38 +1,47 @@
 # app/scripts/reprocess_analyses.py
 import asyncio
 import logging
-from app.infrastructure.database.mongo_session_repository import MongoSessionRepository
-from app.services.gemini_service import GeminiService
-# Import your Analysis Manager/Service here
+from pathlib import Path
+
+from app.agents.interview.services.analysis.combined_analyzer import CombinedAnalyzer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("AnalysisRecovery")
 
-async def reprocess_pending_sessions():
-    db = MongoSessionRepository()
-    gemini = GeminiService(db)
-    
-    # 1. Find stranded sessions
-    pending_sessions = db.get_pending_analysis_sessions()
-    
-    if not pending_sessions:
-        logger.info("No pending analyses found.")
+
+async def reprocess_pending_sessions(data_root: str = "data"):
+    """Rebuild missing final reports from local stateless session folders."""
+    analyzer = CombinedAnalyzer()
+    root = Path(data_root)
+    if not root.exists():
+        logger.info("No data directory found.")
         return
 
-    logger.info(f"Found {len(pending_sessions)} sessions pending analysis. Starting recovery...")
+    sessions = [path for path in root.iterdir() if path.is_dir() and (path / "transcript.txt").exists()]
+    pending = [
+        path for path in sessions
+        if not (path / "reports" / "final_screening_report.json").exists()
+    ]
 
-    for session in pending_sessions:
-        session_id = str(session["_id"])
+    if not pending:
+        logger.info("No pending local analyses found.")
+        return
+
+    logger.info("Found %s sessions pending analysis. Starting recovery...", len(pending))
+    for session_dir in pending:
+        session_id = session_dir.name
         try:
-            # Reuse the EXACT same logic you use in the main flow
-            # (Assuming you put the logic in InterviewService or similar)
-            logger.info(f"Reprocessing {session_id}...")
-            
-            # ... Call your generate_post_interview_analysis(session_id) here ...
-            
+            logger.info("Reprocessing %s...", session_id)
+            await asyncio.to_thread(
+                analyzer.combine_analyses,
+                None,
+                None,
+                None,
+                session_id,
+            )
         except Exception as e:
-            logger.error(f"Failed to recover {session_id}: {e}")
-            # Optional: Increment a 'retry_count' field in DB to prevent infinite loops
+            logger.error("Failed to recover %s: %s", session_id, e, exc_info=True)
+
 
 if __name__ == "__main__":
     asyncio.run(reprocess_pending_sessions())

@@ -2,7 +2,6 @@
 import logging
 from typing import Optional
 from .types import InterviewState, InterviewPhase
-from app.agents.interview.core.ports.session_repository import SessionRepository
 
 logger = logging.getLogger(__name__)
 
@@ -11,12 +10,12 @@ class InterviewStateManager:
     Manages the persistence and transitions of the Interview State Machine.
     Acts as the 'Brain' ensuring we never lose progress.
     """
-    def __init__(self, db_handler: SessionRepository):
-        self.db = db_handler
+    def __init__(self):
+        pass
 
     def load_or_init_state(self, session_id: str) -> InterviewState:
         """Loads existing checkpoint or creates a fresh state."""
-        saved_data = self.db.load_checkpoint(session_id)
+        saved_data = None
         if saved_data:
             try:
                 state = InterviewState(**saved_data)
@@ -33,10 +32,7 @@ class InterviewStateManager:
 
     def save_checkpoint(self, state: InterviewState):
         """Persists state to MongoDB."""
-        try:
-            self.db.save_checkpoint(state.session_id, state.dict())
-        except Exception as e:
-            logger.error(f"State save failed: {e}")
+        pass
 
     def advance_phase(self, state: InterviewState, new_phase: InterviewPhase):
         """Transition to new phase and save."""

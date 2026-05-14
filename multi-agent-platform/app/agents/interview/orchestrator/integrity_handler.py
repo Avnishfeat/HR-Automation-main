@@ -116,12 +116,13 @@ class IntegrityHandler:
         """Handle a video integrity violation."""
         logger.warning(f"INTEGRITY VIOLATION: {violation_type}")
         
-        # Log to DB
-        self.session_mgr.db.update_session(session.session_id, {
+        # Log incident data
+        incident_data = {
             "integrity_status": "warning",
             "last_integrity_issue": violation_type,
             "integrity_failure_time": datetime.now()
-        })
+        }
+        logger.warning(f"Integrity violation detected for {session.session_id}: {incident_data}")
 
         # Get warning message
         warning_text = self._get_warning_message(violation_type)

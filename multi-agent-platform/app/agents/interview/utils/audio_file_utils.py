@@ -10,14 +10,13 @@ logger = logging.getLogger(__name__)
 def get_user_audio_path_for_stt(
     session_id: str, 
     turn_count: int, 
-    candidate_id: str, 
-    is_follow_up: bool
+    is_follow_up: bool = False
 ) -> Path:
     """
     Generates a standardized Path object for saving a candidate's STT audio.
     Ensures the directory structure exists.
     """
-    audio_dir = Path("data") / candidate_id / session_id / "audio"
+    audio_dir = Path("data") / session_id / "audio"
     
     # Ensure the directory exists
     audio_dir.mkdir(parents=True, exist_ok=True)

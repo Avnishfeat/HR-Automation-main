@@ -81,9 +81,9 @@ class StoragePaths:
     STATIC_CACHE_ROOT: Final[str] = "data/static_cache"
     
     AUDIO_DIR: Final[str] = "audio"
-    SNAPSHOTS_DIR: Final[str] = "snapshots"
+    SNAPSHOTS_DIR: Final[str] = "captured_frames"
     TRANSCRIPTS_DIR: Final[str] = "transcripts"
-    REPORTS_DIR: Final[str] = "final_report"
+    REPORTS_DIR: Final[str] = "reports"
     CAPTURED_IMAGES_DIR = "captured_frames"
 
 class SessionStatus:
@@ -174,22 +174,21 @@ class ParticipantThresholds:
 
 # HELPER FUNCTIONS
 def get_audio_path_pattern(
-    candidate_id: str,
     session_id: str,
     turn_count: int,
     is_follow_up: bool = False
 ) -> str:
     suffix = "_followup" if is_follow_up else ""
-    return f"{StoragePaths.DATA_ROOT}/{candidate_id}/{session_id}/{StoragePaths.AUDIO_DIR}/candidate_turn_{turn_count}{suffix}_stt_24k.wav"
+    return f"{StoragePaths.DATA_ROOT}/{session_id}/{StoragePaths.AUDIO_DIR}/candidate_turn_{turn_count}{suffix}_stt_24k.wav"
 
 
-def get_snapshot_dir_path(candidate_id: str, session_id: str) -> str:
-    return f"{StoragePaths.DATA_ROOT}/{candidate_id}/{session_id}/{StoragePaths.SNAPSHOTS_DIR}"
+def get_snapshot_dir_path(session_id: str) -> str:
+    return f"{StoragePaths.DATA_ROOT}/{session_id}/{StoragePaths.SNAPSHOTS_DIR}"
 
 
-def get_transcript_path(candidate_id: str, session_id: str) -> str:
-    return f"{StoragePaths.DATA_ROOT}/{candidate_id}/{StoragePaths.TRANSCRIPTS_DIR}/transcript_{session_id}.txt"
+def get_transcript_path(session_id: str) -> str:
+    return f"{StoragePaths.DATA_ROOT}/{session_id}/transcript.txt"
 
 
-def get_report_path(candidate_id: str, session_id: str) -> str:
-    return f"{StoragePaths.DATA_ROOT}/{candidate_id}/{session_id}/{StoragePaths.REPORTS_DIR}/combined_analysis_{session_id}.json"
+def get_report_path(session_id: str) -> str:
+    return f"{StoragePaths.DATA_ROOT}/{session_id}/{StoragePaths.REPORTS_DIR}/final_screening_report.json"

@@ -37,7 +37,7 @@ class MalpracticeHandler:
         try:
             session.stop_event.set()
             
-            # Log to database
+            # Log to memory/logger
             incident_data = {
                 'malpractice_incident': {
                     'type': violation_type,
@@ -48,7 +48,7 @@ class MalpracticeHandler:
                 },
                 'status': SessionStatus.ERROR_MULTIPLE_PARTICIPANTS
             }
-            self.session_mgr.db.update_session(session.session_id, incident_data)
+            logger.warning(f"Malpractice detected for {session.session_id}: {incident_data}")
 
             # Generate specific warning
             warning_text, should_terminate = self._get_warning_for_type(violation_type)
@@ -119,8 +119,8 @@ class MalpracticeHandler:
         except Exception:
             pass
     
-    def log_incident(self, session_id: str, candidate_id: str, participant_count: int):
-        """Log malpractice incident to database."""
+    def log_incident(self, session_id: str, participant_count: int):
+        """Log malpractice incident."""
         try:
             incident_data = {
                 'malpractice_incident': {
@@ -129,23 +129,18 @@ class MalpracticeHandler:
                     'participant_count': participant_count,
                     'detected_at': datetime.utcnow().isoformat(),
                     'session_id': session_id,
-                    'candidate_id': candidate_id,
                     'action_taken': 'interview_terminated'
                 },
                 'status': SessionStatus.ERROR_MULTIPLE_PARTICIPANTS,
                 'terminated_at': datetime.utcnow().isoformat()
             }
-            self.session_mgr.db.update_session(session_id, incident_data)
+            logger.warning(f"Malpractice logged for {session_id}: {incident_data}")
         except Exception as e:
-            logger.error(f"DB logging failed: {e}", exc_info=True)
+            logger.error(f"Logging failed: {e}", exc_info=True)
     
     def set_termination_reason(self, session_id: str, reason: str):
-        """Set termination reason in database."""
+        """Set termination reason."""
         try:
-            update_data = {
-                'termination_reason': reason,
-                'terminated_at': datetime.utcnow().isoformat()
-            }
-            self.session_mgr.db.update_session(session_id, update_data)
+            logger.info(f"Session {session_id} terminated. Reason: {reason}")
         except Exception:
             pass

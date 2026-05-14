@@ -7,243 +7,78 @@ from pathlib import Path
 from google.cloud import texttospeech
 from google.api_core.client_options import ClientOptions
 import numpy as np
-import soundfile as sf
 import threading
 from collections import defaultdict
 import re
 import io
 
-from app.agents.interview.core.ports.session_repository import SessionRepository
-
 logger = logging.getLogger(__name__)
 
 class TTSService:
-    """
-    Handles Text-to-Speech (TTS) with MongoDB persistence and local caching.
-    """
-    
-    def __init__(self, db_handler: SessionRepository):
-        self.db = db_handler
+    def __init__(self):
         self._session_tts_char_counts = defaultdict(int)
-        self._logging_tasks: Dict[str, List[threading.Thread]] = defaultdict(list)
+        self._logging_tasks = defaultdict(list)
         self._logging_tasks_lock = threading.Lock()
         self._usage_lock = threading.Lock()
-        
-        # Setup Cache Directory (Transient/Local for playback)
         self.cache_dir = Path("data/static_cache")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-
-        # Initialize TTS client
         try:
-            custom_endpoint = "texttospeech.googleapis.com:443"
-            self.tts_client = texttospeech.TextToSpeechClient(client_options=ClientOptions(api_endpoint=custom_endpoint))
-            logger.info(" Google Cloud TTS client loaded.")
-            
-            self.tts_voice = texttospeech.VoiceSelectionParams(
-                language_code="en-IN", 
-                name="en-IN-Chirp3-HD-Alnilam"
-            )
-            
-            self.audio_config = texttospeech.AudioConfig(
-                audio_encoding=texttospeech.AudioEncoding.LINEAR16, 
-                sample_rate_hertz=24000
-            )
-            
-            self.streaming_audio_config = { 
-                'audio_encoding': texttospeech.AudioEncoding.MULAW,
-                'sample_rate_hertz': 24000
-            }
-            
+            self.tts_client = texttospeech.TextToSpeechClient(client_options=ClientOptions(api_endpoint="texttospeech.googleapis.com:443"))
+            self.tts_voice = texttospeech.VoiceSelectionParams(language_code="en-IN", name="en-IN-Chirp3-HD-Alnilam")
+            self.audio_config = texttospeech.AudioConfig(audio_encoding=texttospeech.AudioEncoding.LINEAR16, sample_rate_hertz=24000)
+            self.streaming_audio_config = {'audio_encoding': texttospeech.AudioEncoding.MULAW, 'sample_rate_hertz': 24000}
         except Exception as e:
-            logger.error(f"Failed load TTS client: {e}")
+            logger.error(f"Failed to load TTS client: {e}")
             self.tts_client = None
 
-    def check_health(self) -> bool:
-        if not self.tts_client: return False
-        try:
-            self.tts_client.list_voices()
-            return True
-        except Exception: return False
-        
     def get_or_create_static_audio(self, text: str, filename_key: str) -> Optional[Path]:
-        """
-        Retrieves audio path. 
-        Strategy: DB -> Local Cache. If missing, Generate -> DB -> Local Cache.
-        """
-        if not filename_key.endswith(".wav"):
-            filename_key += ".wav"
-            
+        if not filename_key.endswith(".wav"): filename_key += ".wav"
         file_path = self.cache_dir / filename_key
-        
-        # 1. Check Local Cache (Fastest)
-        if file_path.exists():
-            return file_path
-            
-        # 2. Check MongoDB (Persistence)
-        logger.info(f"Checking MongoDB for audio: {filename_key}")
-        db_audio = self.db.get_file(filename_key)
-        
-        if db_audio:
-            logger.info(f"Found in DB, downloading to local cache: {file_path}")
-            with open(file_path, "wb") as f:
-                f.write(db_audio)
-            return file_path
-
-        # 3. Generate New (if not in DB or Local)
-        if not self.tts_client:
-            logger.error("TTS client not available.")
-            return None
-
+        if file_path.exists(): return file_path
+        if not self.tts_client: return None
         try:
-            logger.info(f"Generating NEW static audio: '{filename_key}'")
-            input_text = texttospeech.SynthesisInput(text=text)
-            response = self.tts_client.synthesize_speech(
-                request={
-                    "input": input_text,
-                    "voice": self.tts_voice,
-                    "audio_config": self.audio_config
-                }
-            )
-            audio_content = response.audio_content
-
-            # A. Save to MongoDB (Golden Source)
-            self.db.save_file(filename=filename_key, data=audio_content)
-
-            # B. Save to Local (For Playback)
-            with open(file_path, "wb") as out:
-                out.write(audio_content)
-                
+            response = self.tts_client.synthesize_speech(request={"input": texttospeech.SynthesisInput(text=text), "voice": self.tts_voice, "audio_config": self.audio_config})
+            with open(file_path, "wb") as out: out.write(response.audio_content)
             return file_path
-            
         except Exception as e:
-            logger.error(f"Failed to generate static audio: {e}", exc_info=True)
+            logger.error(f"Failed to generate static audio: {e}")
             return None
 
-    def stream_tts_from_text_generator(self, text_generator: iter, session_id: str, turn_count: Any, candidate_id: str, is_follow_up: bool) -> iter:
+    def stream_tts_from_text_generator(self, text_generator: iter, session_id: str, turn_count: Any, is_follow_up: bool) -> iter:
         if not self.tts_client: return
-
-        full_question_text = []
+        full_text = []
         try:
-            first_sentence = next(text_generator)
-            if not first_sentence: return
-            full_question_text.append(first_sentence)
+            first = next(text_generator)
+            if not first: return
+            full_text.append(first)
         except StopIteration: return
-        except Exception:
-            yield from self.stream_plain_text("Apologies, an error occurred.", session_id, turn_count, candidate_id)
-            return
-
         def request_generator():
-            yield texttospeech.StreamingSynthesizeRequest(
-                streaming_config={
-                    'voice': {'language_code': 'en-IN', 'name': 'en-IN-Chirp3-HD-Alnilam'},
-                    'streaming_audio_config': self.streaming_audio_config
-                }
-            )
-            yield texttospeech.StreamingSynthesizeRequest(input={'text': first_sentence})
-            for sentence in text_generator:
-                full_question_text.append(sentence)
-                yield texttospeech.StreamingSynthesizeRequest(input={'text': sentence})
-
+            yield texttospeech.StreamingSynthesizeRequest(streaming_config={'voice': {'language_code': 'en-IN', 'name': 'en-IN-Chirp3-HD-Alnilam'}, 'streaming_audio_config': self.streaming_audio_config})
+            yield texttospeech.StreamingSynthesizeRequest(input={'text': first})
+            for s in text_generator:
+                full_text.append(s)
+                yield texttospeech.StreamingSynthesizeRequest(input={'text': s})
         try:
-            tts_stream = self.tts_client.streaming_synthesize(requests=request_generator())
-            for tts_response in tts_stream:
-                if tts_response.audio_content:
-                    yield tts_response.audio_content
+            for res in self.tts_client.streaming_synthesize(requests=request_generator()):
+                if res.audio_content: yield res.audio_content
+            if full_text: self._enqueue_usage_log(" ".join(full_text), session_id, turn_count, is_follow_up)
+        except Exception: pass
 
-            combined_text = " ".join(full_question_text)
-            if combined_text:
-                self._enqueue_usage_log(combined_text, session_id, turn_count, candidate_id, is_follow_up)
-
-        except Exception as e:
-            logger.error(f"Error in stream_tts: {e}", exc_info=True)
-            yield from self.stream_plain_text("Apologies, an error occurred.", session_id, turn_count, candidate_id)
-
-    def stream_plain_text(self, plain_text: str, session_id: str, turn_count: Any, candidate_id: str, is_follow_up: bool = False) -> iter:
+    def stream_plain_text(self, plain_text: str, session_id: str, turn_count: Any, is_follow_up: bool = False) -> iter:
         if not self.tts_client: return
         try:
-            self._enqueue_usage_log(plain_text, session_id, turn_count, candidate_id, is_follow_up)
+            self._enqueue_usage_log(plain_text, session_id, turn_count, is_follow_up)
             def request_generator():
-                yield texttospeech.StreamingSynthesizeRequest(
-                    streaming_config={
-                        'voice': {'language_code': 'en-IN', 'name': 'en-IN-Chirp3-HD-Alnilam'},
-                        'streaming_audio_config': self.streaming_audio_config
-                    }
-                )
+                yield texttospeech.StreamingSynthesizeRequest(streaming_config={'voice': {'language_code': 'en-IN', 'name': 'en-IN-Chirp3-HD-Alnilam'}, 'streaming_audio_config': self.streaming_audio_config})
                 yield texttospeech.StreamingSynthesizeRequest(input={'text': plain_text})
+            for res in self.tts_client.streaming_synthesize(requests=request_generator()):
+                if res.audio_content: yield res.audio_content
+        except Exception: pass
 
-            tts_stream = self.tts_client.streaming_synthesize(requests=request_generator())
-            for tts_response in tts_stream:
-                if tts_response.audio_content: yield tts_response.audio_content
-        except Exception as e:
-            logger.error(f"Plain text streaming TTS fail: {e}", exc_info=True)
-
-    def _log_usage_and_save(self, text: str, session_id: str, turn_count: Any, candidate_id: str, is_follow_up: bool):
-        char_count = len(text)
-        with self._usage_lock:
-            self._session_tts_char_counts[session_id] += char_count
-        self.db.update_tts_character_usage(session_id, char_count)
-        self.db.add_message_to_session(
-            session_id, "assistant", text, 
-            audio_path="[Streamed]", 
-            is_follow_up=is_follow_up, turn_count=turn_count
-        )
+    def _enqueue_usage_log(self, text, session_id, turn_count, is_follow_up):
+        def worker():
+            with self._usage_lock: self._session_tts_char_counts[session_id] += len(text)
+        threading.Thread(target=worker, daemon=True).start()
 
     def end_session(self, session_id: str):
-        self._wait_for_logging_tasks(session_id)
-        if session_id in self._session_tts_char_counts:
-            del self._session_tts_char_counts[session_id]
-        with self._logging_tasks_lock:
-            self._logging_tasks.pop(session_id, None)
-
-    def _enqueue_usage_log(
-        self,
-        text: str,
-        session_id: str,
-        turn_count: Any,
-        candidate_id: str,
-        is_follow_up: bool,
-    ) -> None:
-        def worker():
-            try:
-                self._log_usage_and_save(text, session_id, turn_count, candidate_id, is_follow_up)
-            finally:
-                self._remove_logging_task(session_id, threading.current_thread())
-
-        task = threading.Thread(
-            target=worker,
-            daemon=True,
-            name=f"TTSLog-{session_id[:8]}",
-        )
-        with self._logging_tasks_lock:
-            self._logging_tasks[session_id].append(task)
-        task.start()
-
-    def _remove_logging_task(self, session_id: str, task: threading.Thread) -> None:
-        with self._logging_tasks_lock:
-            tasks = self._logging_tasks.get(session_id)
-            if not tasks:
-                return
-            if task in tasks:
-                tasks.remove(task)
-            if not tasks:
-                self._logging_tasks.pop(session_id, None)
-
-    def _wait_for_logging_tasks(self, session_id: str, timeout_sec: float = 5.0) -> None:
-        deadline = time.time() + timeout_sec
-        while True:
-            with self._logging_tasks_lock:
-                tasks = list(self._logging_tasks.get(session_id, []))
-
-            if not tasks:
-                return
-
-            remaining = deadline - time.time()
-            if remaining <= 0:
-                logger.warning(
-                    "Timed out waiting for TTS logging tasks | session=%s pending=%s",
-                    session_id,
-                    len(tasks),
-                )
-                return
-
-            tasks[0].join(timeout=min(0.25, remaining))
+        if session_id in self._session_tts_char_counts: del self._session_tts_char_counts[session_id]

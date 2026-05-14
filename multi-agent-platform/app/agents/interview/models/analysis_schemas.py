@@ -19,7 +19,6 @@ class QuestionAnalysis(BaseModel):
 
 class OverallAnalysis(BaseModel):
     """Schema for transcript analysis"""
-    user_id: Optional[str] = Field(None, description="Candidate user ID") # Made optional if not always present
     session_id: str = Field(..., description="Interview session ID")
     interview_date: Optional[str] = Field(None, description="Interview date") # Made optional
     questions_analyzed: List[QuestionAnalysis] = Field(..., description="List of Q&A analyses")
@@ -97,7 +96,6 @@ class VoiceAuthenticityResult(BaseModel):
     samples_analyzed: int
 
 class VoiceDetectionReport(BaseModel):
-    user_id: Optional[str] = None
     session_id: Optional[str] = None
     analysis_timestamp: str
     samples_analyzed: Optional[int] = None
@@ -124,7 +122,6 @@ class ScoringMetadata(BaseModel):
 class CombinedAnalysisReport(BaseModel):
     """Schema for the final combined analysis report"""
     session_id: str
-    candidate_id: str
     interview_date: Optional[str]
 
     # Scores

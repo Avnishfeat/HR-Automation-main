@@ -77,7 +77,7 @@ class MeetInterviewOrchestrator:
         self.audio_handler = audio_handler
 
         # Initialize sub-components
-        self.state_mgr = InterviewStateManager(session_manager.db)
+        self.state_mgr = InterviewStateManager()
         self.response_handler = InterviewResponseHandler(
             interview_service, self.audio_handler, self.stt_service
         )
@@ -207,7 +207,7 @@ class MeetInterviewOrchestrator:
                     return False
                 
                 logger.warning("Greeting playback failed or interrupted")
-                if session.meet.get_participant_count() < 2:
+                if await self._candidate_absent(session):
                     if await self._wait_for_rejoin(session):
                         await asyncio.sleep(2)
                         continue
@@ -241,7 +241,7 @@ class MeetInterviewOrchestrator:
                 self.interview_svc.transcript_manager._update_transcript_immediate(
                     session.session_id, response.transcript
                 )
-                self._log_transcript(session.session_id, response, session.candidate_id)
+                self._log_transcript(session.session_id, response)
                 await asyncio.to_thread(session.meet.disable_microphone)
                 return True
             
@@ -341,7 +341,7 @@ class MeetInterviewOrchestrator:
                 self.interview_svc.transcript_manager._update_transcript_immediate(
                     session.session_id, result.final_response.transcript
                 )
-                self._log_transcript(session.session_id, result.final_response, session.candidate_id)
+                self._log_transcript(session.session_id, result.final_response)
                 transcript_log.append({
                     "role": "user", 
                     "content": result.final_response.transcript,
@@ -411,7 +411,7 @@ class MeetInterviewOrchestrator:
     async def _ask_question(self, session: InterviewSession, turn_count: int) -> Tuple[bool, int, float]:
         start_ts = time.time()
         gemini_task = asyncio.create_task(asyncio.to_thread(
-            self.interview_svc.stream_interview_turn, session.session_id, turn_count, session.candidate_id
+            self.interview_svc.stream_interview_turn, session.session_id, turn_count
         ))
         
         await asyncio.to_thread(session.meet.enable_microphone)
@@ -457,20 +457,21 @@ class MeetInterviewOrchestrator:
             self.interview_svc.transcript_manager.update_pending_transcript(session.session_id, text)
         
         start_time, transcript = await self.stt_service._record_and_process_stt_streaming(
-            session.session_id, turn_count, session.candidate_id, is_follow_up,
+            session.session_id, turn_count, is_follow_up,
             on_interim_transcript=on_interim
         )
         end_time = datetime.now()
         await asyncio.to_thread(session.meet.disable_microphone)
         
-        audio_path = get_user_audio_path_for_stt(session.session_id, turn_count, session.candidate_id, is_follow_up)
+        audio_path = get_user_audio_path_for_stt(session.session_id, turn_count, is_follow_up)
         return ResponseData(transcript, audio_path, start_time, end_time, turn_count, is_follow_up)
 
     async def _play_text_with_cache(self, text: str, cache_key: str, session: InterviewSession, turn_count: int) -> bool:
         if session.stop_event.is_set(): return False
+        self.interview_svc.log_assistant_message(session.session_id, text, turn_count)
         path = self.interview_svc.get_static_audio_path(text, cache_key)
         if not path: return False
-        
+
         success = await asyncio.to_thread(self.audio_handler.play_wav_file, path, session.meet, session.stop_event)
         return success
 
@@ -488,16 +489,15 @@ class MeetInterviewOrchestrator:
 
         return InterviewSession(
             session_id, 
-            session_data.get('candidate_id'), 
             safe_controller,
             session_data.get('stop_interview'),
             session_data['malpractice_flags'] 
         )
 
-    def _log_transcript(self, session_id, response, candidate_id):
+    def _log_transcript(self, session_id, response):
         self.interview_svc.process_and_log_transcript(
             session_id, str(response.audio_path), response.transcript,
-            response.turn_count, candidate_id, response.start_time, response.end_time,
+            response.turn_count, response.start_time, response.end_time,
             response.is_follow_up
         )
 
@@ -519,8 +519,12 @@ class MeetInterviewOrchestrator:
     async def _wait_for_rejoin(self, session: InterviewSession) -> bool:
         MAX_WAIT_SECONDS = 180
         POLL_INTERVAL = 2
-        
-        if session.meet.get_participant_count() >= 2: return True
+
+        if await self._candidate_present(session):
+            return True
+        if not await self._candidate_absent(session):
+            return True
+
         logger.warning(f" Candidate disconnected. Waiting {MAX_WAIT_SECONDS}s")
         try: session.meet.send_chat_message("Connection lost. I am waiting here for you to rejoin.")
         except Exception: pass
@@ -530,7 +534,7 @@ class MeetInterviewOrchestrator:
             self._heartbeat_session(session.session_id)
             if session.stop_event.is_set(): return False
             try:
-                if session.meet.get_participant_count() >= 2:
+                if await self._candidate_present(session):
                     # Track this reconnection
                     reconnect_count = self.session_mgr.increment_reconnection_count(session.session_id)
                     logger.info(f"Candidate rejoined! (Reconnection #{reconnect_count})")
@@ -544,6 +548,30 @@ class MeetInterviewOrchestrator:
             except Exception: pass
             await asyncio.sleep(POLL_INTERVAL)
         return False 
+
+    async def _candidate_present(self, session: InterviewSession, checks: int = 2, interval: float = 0.5) -> bool:
+        for _ in range(checks):
+            try:
+                count = await asyncio.to_thread(session.meet.get_participant_count)
+                if count < ParticipantThresholds.MIN_VALID_COUNT:
+                    return False
+            except Exception:
+                return True
+            await asyncio.sleep(interval)
+        return True
+
+    async def _candidate_absent(self, session: InterviewSession, checks: int = 3, interval: float = 0.75) -> bool:
+        misses = 0
+        for _ in range(checks):
+            try:
+                count = await asyncio.to_thread(session.meet.get_participant_count)
+                if count >= ParticipantThresholds.MIN_VALID_COUNT:
+                    return False
+                misses += 1
+            except Exception:
+                return False
+            await asyncio.sleep(interval)
+        return misses >= checks
     
     async def _run_conclusion(self, session: InterviewSession, state: InterviewState):
         logger.info("Playing outro message...")

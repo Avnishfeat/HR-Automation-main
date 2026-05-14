@@ -27,7 +27,7 @@ class TranscriptParser:
     
     @staticmethod
     def _extract_metadata(lines: List[str]) -> Dict[str, str]:
-        """Extract session ID and User ID from headers (if present)."""
+        """Extract known stateless transcript headers when present."""
         metadata = {}
         
         try:
@@ -43,7 +43,7 @@ class TranscriptParser:
                     if key == 'session id':
                         metadata['session_id'] = val
                     elif key == 'candidate id':
-                        metadata['user_id'] = val
+                        metadata['legacy_candidate_ref'] = val
                     elif key == 'date':
                         metadata['date'] = val
                         

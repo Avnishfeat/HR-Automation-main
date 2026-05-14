@@ -9,7 +9,6 @@ from datetime import datetime
 from typing import Optional, List, Iterator, Dict
 from pathlib import Path
 
-from app.agents.interview.core.ports.session_repository import SessionRepository
 from app.agents.interview.services.gemini_service import GeminiService
 from app.agents.interview.services.audio.tts_service import TTSService
 from app.agents.interview.services.transcript_manager import TranscriptManager
@@ -18,396 +17,98 @@ from app.agents.interview.services.analysis.combined_analyzer import CombinedAna
 logger = logging.getLogger(__name__)
 
 class InterviewService:
-    def __init__(self, db_handler: SessionRepository, combined_analyzer: CombinedAnalyzer):
-        self.db = db_handler
-        self.gemini_service = GeminiService(self.db)
-        self.tts_service = TTSService(self.db)
-        self.transcript_manager = TranscriptManager(self.db)
+    def __init__(self, combined_analyzer: CombinedAnalyzer):
+        self.gemini_service = GeminiService()
+        self.tts_service = TTSService()
+        self.transcript_manager = TranscriptManager()
         self.combined_analyzer = combined_analyzer
         self.candidate_names: Dict[str, str] = {}
         self._transcript_tasks: Dict[str, List[threading.Thread]] = {}
         self._transcript_tasks_lock = threading.Lock()
 
-    # =========================================================================
-    # SESSION MANAGEMENT
-    # =========================================================================
-
-    def start_new_interview(
-        self,
-        resume_text: str,
-        candidate_id: str,
-        job_role: str,
-        questionnaire: List[str],
-        job_description: Optional[str] = None,
-        webhook_url: Optional[str] = None
-    ) -> str:
-        
-        session_id = self.db.create_session(
-            resume_text,
-            candidate_id,
-            job_role,
-            questionnaire or [],
-            job_description,
-            webhook_url
-        )
-        
-        candidate_name = self._extract_candidate_name(resume_text)
-        self.candidate_names[session_id] = candidate_name
-        logger.info(f"Extracted candidate name: {candidate_name}")
-        
+    def start_new_interview(self, resume_text, job_role, questionnaire, job_description=None, session_id=None) -> str:
+        import uuid
+        session_id = session_id or str(uuid.uuid4())
         try:
-            self.gemini_service.start_chat_session(
-                session_id,
-                resume_text,
-                questionnaire,
-                job_role,
-                job_description
-            )
-            
+            name = self.gemini_service.extract_candidate_name(resume_text)
+            self.candidate_names[session_id] = name
+            self.gemini_service.start_chat_session(session_id, resume_text, questionnaire, job_role, job_description)
             self.transcript_manager.initialize_transcript_state(session_id)
-            
-        except Exception as e:
-            if session_id in self.candidate_names:
-                del self.candidate_names[session_id]
-            logger.error(f"Failed to start interview services: {e}", exc_info=True)
+            return session_id
+        except Exception:
+            self.candidate_names.pop(session_id, None)
+            self.gemini_service.end_session(session_id)
+            self.transcript_manager.clear_session_state(session_id)
             raise
-        
-        return session_id
 
-    def end_interview_session(self, session_id: str):
-        if session_id in self.candidate_names:
-            del self.candidate_names[session_id]
+    def get_candidate_name(self, session_id: str) -> str:
+        return self.candidate_names.get(session_id, "Candidate")
 
-        self._wait_for_transcript_tasks(session_id)
+    def finalize_interview_session(self, session_id: str) -> str:
+        return self.transcript_manager.save_final_transcript(session_id)
+
+    def cleanup_session_state(self, session_id: str):
+        self.candidate_names.pop(session_id, None)
         self.gemini_service.end_session(session_id)
         self.tts_service.end_session(session_id)
         self.transcript_manager.clear_session_state(session_id)
-        
-        # FIX: Save final transcript to MongoDB instead of disk
-        self.transcript_manager.save_final_transcript_to_db(session_id)
-        
-        logger.info(f"Interview services stopped and data persisted for {session_id}")
 
-    # =========================================================================
-    # ANALYSIS & REPORTING
-    # =========================================================================
-    
-    # This method is kept if you want to trigger it manually via API, 
-    # but it is no longer called automatically by end_interview_session
-    async def trigger_post_interview_analysis(self, session_id: str):
-        """
-        Triggers the full Combined Analysis (Transcript + Voice + Behavioral).
-        """
-        logger.info(f"Triggering FINAL COMBINED ANALYSIS for {session_id}...")
-
-        try:
-            session_data = self.db.get_full_session(session_id)
-            if not session_data:
-                logger.error(f"Session {session_id} not found.")
-                return
-
-            candidate_id = session_data.get("candidate_id", "unknown")
-
-            # Run Combined Analysis (Synchronously in a thread)
-            report = await asyncio.to_thread(
-                self.combined_analyzer.combine_analyses,
-                behavioral_result=None, 
-                transcript_result=None, 
-                voice_result=None,      
-                session_id=session_id,
-                candidate_id=candidate_id
-            )
-
-            if report:
-                logger.info(f"Combined Analysis Complete. Score: {report.final_weighted_score}")
-            else:
-                logger.error("Combined Analysis returned None.")
-
-        except Exception as e:
-            logger.error(f"Analysis Trigger Failed: {e}", exc_info=True)
-            self.db.mark_analysis_pending(session_id)
-
-    # =========================================================================
-    # GREETING GENERATION
-    # =========================================================================
+    def end_interview_session(self, session_id: str):
+        self.finalize_interview_session(session_id)
+        self.cleanup_session_state(session_id)
 
     def generate_initial_greeting(self, session_id: str) -> str:
-        """
-        Generates personalized opening greeting for HR screening.
-        """
         name = self.candidate_names.get(session_id, "Candidate")
-        
-        base = (
-            "Hello and welcome. I am Eva, your HR recruiter for today's screening. "
-            "For our conversation today, please ensure your camera is turned on "
-            "and remains on throughout the interview. "
-            "Also, please make sure your microphone is enabled when you are speaking. "
-        )
-        
-        if name == "Candidate":
-            dynamic = (
-                "To start, could you please introduce yourself and tell me about your background."
-            )
-        else:
-            dynamic = (
-                f"Hello {name}. Let's begin. Please tell me about your background "
-                f"and what brings you here today."
-            )
-        
-        return base + dynamic
+        return f"Hello {name}. I am Eva. Please introduce yourself."
 
-    # =========================================================================
-    # AUDIO GENERATION
-    # =========================================================================
+    def get_static_audio_path(self, text, key):
+        safe_key = re.sub(r'[^a-zA-Z0-9_-]', '_', str(key)).lower()
+        text_hash = hashlib.md5(text.encode("utf-8")).hexdigest()[:8]
+        return self.tts_service.get_or_create_static_audio(text, f"{safe_key}_{text_hash}")
 
-    def get_static_audio_path(self, text: str, key_suffix: str) -> Optional[Path]:
-        """Gets or creates cached audio for static messages."""
-        safe_key = re.sub(r'[^a-zA-Z0-9]', '_', key_suffix).lower()
-        text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()[:8]
-        full_key = f"{safe_key}_{text_hash}"
-        
-        return self.tts_service.get_or_create_static_audio(text, full_key)
-
-    def stream_interview_turn(
-        self,
-        session_id: str,
-        turn_count: int,
-        candidate_id: str,
-        replay_from_turn: Optional[int] = None
-    ) -> Optional[Iterator[bytes]]:
-        """
-        Generates and streams a complete HR screening interview turn (question).
-        """
-        if replay_from_turn is not None:
-            return self._replay_question(
-                session_id, turn_count, candidate_id, replay_from_turn
-            )
-        
-        try:
-            last_answer = self.transcript_manager.get_latest_transcript(session_id)
-            sentence_generator = self.gemini_service.stream_gemini_sentences(
-                session_id, last_answer
-            )
-        except Exception as e:
-            logger.error(f"Error creating Gemini generator: {e}", exc_info=True)
-            return self.stream_plain_text(
-                "Apologies, an error occurred.",
-                session_id,
-                turn_count,
-                candidate_id
-            )
-        
-        try:
-            return self.tts_service.stream_tts_from_text_generator(
-                sentence_generator,
-                session_id,
-                turn_count,
-                candidate_id,
-                is_follow_up=False
-            )
-        except Exception as e:
-            logger.error(f"Error in TTS streaming: {e}", exc_info=True)
-            return self.stream_plain_text(
-                "Apologies, an error occurred.",
-                session_id,
-                turn_count,
-                candidate_id
-            )
-
-    def stream_plain_text(
-        self,
-        plain_text: str,
-        session_id: str,
-        turn_count: int,
-        candidate_id: str,
-        is_follow_up: bool = False
-    ) -> Optional[Iterator[bytes]]:
-        """Streams plain text directly to TTS."""
-        try:
-            return self.tts_service.stream_plain_text(
-                plain_text,
-                session_id,
-                turn_count,
-                candidate_id,
-                is_follow_up
-            )
-        except Exception as e:
-            logger.error(f"Error streaming plain text: {e}", exc_info=True)
-            return None
-
-    # =========================================================================
-    # TRANSCRIPT MANAGEMENT
-    # =========================================================================
-
-    def process_and_log_transcript(
-        self,
-        session_id: str,
-        audio_path: str,
-        transcript: str,
-        turn_count: int,
-        candidate_id: str,
-        start_time: Optional[datetime],
-        end_time: Optional[datetime],
-        is_follow_up_response: bool = False
-    ):
-        """Schedules transcript persistence off the critical reply path."""
-        self._start_transcript_task(
+    def stream_interview_turn(self, session_id, turn_count, replay_from_turn=None):
+        if replay_from_turn is not None: return self._replay_question(session_id, turn_count, replay_from_turn)
+        ans = self.transcript_manager.get_latest_transcript(session_id)
+        gen = self._logging_sentence_generator(
+            self.gemini_service.stream_gemini_sentences(session_id, ans),
             session_id,
-            self.transcript_manager.process_and_log_transcript,
-            session_id,
-            audio_path,
-            transcript,
-            turn_count,
-            candidate_id,
-            start_time,
-            end_time,
-            is_follow_up_response,
+            turn_count
         )
+        return self.tts_service.stream_tts_from_text_generator(gen, session_id, turn_count, False)
 
-    def generate_final_transcript_file(self, session_id: str):
-        """Generates the final transcript file."""
+    def stream_plain_text(self, text, session_id, turn_count, is_follow_up=False):
+        self.log_assistant_message(session_id, text, turn_count)
+        return self.tts_service.stream_plain_text(text, session_id, turn_count, is_follow_up)
+
+    def process_and_log_transcript(self, session_id, audio_path, transcript, turn_count, start_time, end_time, is_follow_up=False):
+        self.transcript_manager.process_and_log_transcript(session_id, audio_path, transcript, turn_count, start_time, end_time, is_follow_up)
+
+    def log_assistant_message(self, session_id: str, text: str, turn_count: int):
+        if text and text.strip():
+            self.transcript_manager.log_assistant_message(session_id, text.strip(), turn_count)
+
+    def _logging_sentence_generator(self, sentence_generator, session_id: str, turn_count: int):
+        parts = []
         try:
-            self._wait_for_transcript_tasks(session_id)
-            self.transcript_manager.save_final_transcript_to_db(session_id)
-        except Exception as e:
-            logger.error(f"Failed to generate transcript: {e}", exc_info=True)
+            for sentence in sentence_generator:
+                if sentence:
+                    parts.append(sentence)
+                yield sentence
+        finally:
+            assistant_text = " ".join(part.strip() for part in parts if part and part.strip()).strip()
+            if assistant_text:
+                self.log_assistant_message(session_id, assistant_text, turn_count)
 
-    # =========================================================================
-    # PRIVATE HELPER METHODS
-    # =========================================================================
+    def _replay_question(self, session_id, turn_count, replay_from_turn):
+        history = self.transcript_manager.get_history(session_id)
+        for msg in history:
+            if msg.get('turn') == replay_from_turn and msg.get('role') == 'assistant':
+                text = msg.get('text')
+                self.log_assistant_message(session_id, text, turn_count)
+                return self.tts_service.stream_plain_text(text, session_id, turn_count, False)
+        return self._stream_fallback_question(session_id, turn_count)
 
-    def _extract_candidate_name(self, resume_text: str) -> str:
-        try:
-            extracted = self.gemini_service.extract_candidate_name(resume_text)
-            return extracted if extracted else "Candidate"
-        except Exception as e:
-            logger.warning(f"Name extraction failed: {e}. Using 'Candidate'")
-            return "Candidate"
-
-    def _replay_question(
-        self,
-        session_id: str,
-        turn_count: int,
-        candidate_id: str,
-        replay_from_turn: int
-    ) -> Optional[Iterator[bytes]]:
-        """Replays a previous question as a new turn."""
-        logger.info(
-            f"Replaying question from turn {replay_from_turn} as turn {turn_count}"
-        )
-        
-        try:
-            session_data = self.db.get_full_session(session_id) 
-            
-            if not session_data or 'conversation' not in session_data:
-                logger.error(f"Session {session_id} not found or has no conversation")
-                return self._stream_fallback_question(session_id, turn_count, candidate_id)
-            
-            message_to_replay = None
-            for msg in session_data['conversation']:
-                if (msg.get('turn') == replay_from_turn and 
-                    msg.get('role') == 'assistant'):
-                    message_to_replay = msg.get('text')
-                    break
-            
-            if not message_to_replay:
-                logger.warning(f"Could not find turn {replay_from_turn} to replay")
-                return self._stream_fallback_question(session_id, turn_count, candidate_id)
-            
-            question_only = self._extract_question_from_text(message_to_replay)
-            replay_text = question_only or message_to_replay
-            
-            return self.tts_service.stream_plain_text(
-                replay_text,
-                session_id,
-                turn_count,
-                candidate_id,
-                is_follow_up=False
-            )
-            
-        except Exception as e:
-            logger.error(f"Error during question replay: {e}", exc_info=True)
-            return self._stream_fallback_question(session_id, turn_count, candidate_id)
-
-    def _extract_question_from_text(self, text: str) -> str:
-        if not text:
-            return ""
-        
-        sentences = re.split(r'(?<=[.!?])\s+', text.strip())
-        
-        question_sentence = None
-        for sentence in reversed(sentences):
-            stripped = sentence.strip()
-            if not stripped:
-                continue
-            question_sentence = stripped
-            if stripped.endswith('?'):
-                break
-        
-        return question_sentence or text.strip()
-
-    def _stream_fallback_question(
-        self,
-        session_id: str,
-        turn_count: int,
-        candidate_id: str
-    ) -> Iterator[bytes]:
-        fallback = (
-            "My apologies, I lost my train of thought. "
-            "Let me ask you this instead. "
-            "What motivated you to apply for this position?"
-        )
-        result = self.tts_service.stream_plain_text(
-            fallback,
-            session_id,
-            turn_count,
-            candidate_id,
-            is_follow_up=False
-        )
-        return result if result is not None else iter([])
-
-    def _start_transcript_task(self, session_id: str, target, *args) -> None:
-        def worker():
-            try:
-                target(*args)
-            finally:
-                self._remove_transcript_task(session_id, threading.current_thread())
-
-        thread = threading.Thread(
-            target=worker,
-            daemon=True,
-            name=f"TranscriptPersist-{session_id[:8]}",
-        )
-        with self._transcript_tasks_lock:
-            self._transcript_tasks.setdefault(session_id, []).append(thread)
-        thread.start()
-
-    def _remove_transcript_task(self, session_id: str, task: threading.Thread) -> None:
-        with self._transcript_tasks_lock:
-            tasks = self._transcript_tasks.get(session_id)
-            if not tasks:
-                return
-            if task in tasks:
-                tasks.remove(task)
-            if not tasks:
-                self._transcript_tasks.pop(session_id, None)
-
-    def _wait_for_transcript_tasks(self, session_id: str, timeout_sec: float = 5.0) -> None:
-        deadline = time.time() + timeout_sec
-        while True:
-            with self._transcript_tasks_lock:
-                tasks = list(self._transcript_tasks.get(session_id, []))
-
-            if not tasks:
-                return
-
-            remaining = deadline - time.time()
-            if remaining <= 0:
-                logger.warning(
-                    "Timed out waiting for transcript persistence tasks | session=%s pending=%s",
-                    session_id,
-                    len(tasks),
-                )
-                return
-
-            tasks[0].join(timeout=min(0.25, remaining))
+    def _stream_fallback_question(self, session_id, turn_count):
+        text = "What motivated you to apply?"
+        self.log_assistant_message(session_id, text, turn_count)
+        return self.tts_service.stream_plain_text(text, session_id, turn_count, False)

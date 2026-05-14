@@ -16,8 +16,9 @@ async def health_check():
     services = get_services()
     
     is_healthy = all([
-        services.db_handler,
         services.interview_service,
+        services.meet_session_mgr,
+        services.combined_analyzer,
         services.stt_service,
         services.tts_service
     ])
@@ -29,8 +30,8 @@ async def detailed_health_check():
     services = get_services()
     
     services_status = {
-        "db_handler": services.db_handler is not None,
         "interview_service": services.interview_service is not None,
+        "combined_analyzer": services.combined_analyzer is not None,
         "meet_manager": services.meet_session_mgr is not None,
         "stt_service": services.stt_service is not None,
         "tts_service": services.tts_service is not None
@@ -42,11 +43,6 @@ async def detailed_health_check():
             detail={"status": "down", "details": services_status}
         )
 
-    async def check_db():
-        if hasattr(services.db_handler, 'check_connection'):
-            return services.db_handler.check_connection()
-        return True
-
     async def check_llm():
         if services.combined_analyzer and hasattr(services.combined_analyzer, 'check_health'):
             return services.combined_analyzer.check_health()
@@ -54,12 +50,16 @@ async def detailed_health_check():
 
     async def check_stt():
         if services.stt_service:
-            return await asyncio.to_thread(services.stt_service.check_health)
+            if hasattr(services.stt_service, 'check_health'):
+                return await asyncio.to_thread(services.stt_service.check_health)
+            return True
         return False
 
     async def check_tts():
         if services.tts_service:
-            return await asyncio.to_thread(services.tts_service.check_health)
+            if hasattr(services.tts_service, 'check_health'):
+                return await asyncio.to_thread(services.tts_service.check_health)
+            return True
         return False
 
     async def check_disk_write():
@@ -72,14 +72,13 @@ async def detailed_health_check():
         except Exception:
             return False
 
-    db_ok, llm_ok, disk_ok, stt_ok, tts_ok = await asyncio.gather(
-        check_db(), check_llm(), check_disk_write(), check_stt(), check_tts()
+    llm_ok, disk_ok, stt_ok, tts_ok = await asyncio.gather(
+        check_llm(), check_disk_write(), check_stt(), check_tts()
     )
 
     health_report = {
         "status": "healthy",
         "components": {
-            "database": "connected" if db_ok else "disconnected",
             "llm_api": "operational" if llm_ok else "error",
             "stt_v2": "operational" if stt_ok else "error",
             "tts": "operational" if tts_ok else "error",
@@ -87,7 +86,7 @@ async def detailed_health_check():
         }
     }
 
-    if not (db_ok and llm_ok and disk_ok and stt_ok and tts_ok):
+    if not (llm_ok and disk_ok and stt_ok and tts_ok):
         health_report["status"] = "degraded"
         return JSONResponse(status_code=503, content=health_report)
 

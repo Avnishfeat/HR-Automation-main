@@ -63,13 +63,14 @@ class InterviewResponseHandler:
             session,
             StaticMessages.OUTRO_MESSAGE,
             StaticMessages.CACHE_KEY_OUTRO,
+            state.turn_count,
         )
         session.stop_event.set()
         return HandlerResult(final_response=response, proceed=False)
 
     async def _handle_no_response(self, session, state, original, record_callback) -> HandlerResult:
         logger.warning("No response detected")
-        await self._play_audio(session, StaticMessages.NO_RESPONSE, StaticMessages.CACHE_KEY_ERROR_NO_RESPONSE)
+        await self._play_audio(session, StaticMessages.NO_RESPONSE, StaticMessages.CACHE_KEY_ERROR_NO_RESPONSE, state.turn_count)
         await self._replay_last_question(session, state)
         # FIX: Disable mic after replaying the question so the VB-Audio cable
         # is clean before STT recording captures the candidate's retry response.
@@ -82,10 +83,11 @@ class InterviewResponseHandler:
     # HELPERS
     # =========================================================================
 
-    async def _play_audio(self, session, text, cache_key):
+    async def _play_audio(self, session, text, cache_key, turn_count):
         await asyncio.to_thread(session.meet.enable_microphone)
         await asyncio.sleep(InterviewTiming.MIC_TOGGLE_DELAY_SEC)
-        
+        self.interview_svc.log_assistant_message(session.session_id, text, turn_count)
+
         path = self.interview_svc.get_static_audio_path(text, cache_key)
         if path:
             await asyncio.to_thread(self.audio_handler.play_wav_file, path, session.meet, session.stop_event)
@@ -93,14 +95,12 @@ class InterviewResponseHandler:
     async def _replay_last_question(self, session, state):
         question_turn = max(1, state.turn_count - 1)
         stream = self.interview_svc.stream_interview_turn(
-            session.session_id, 
-            state.turn_count + 1, 
-            session.candidate_id, 
+            session.session_id,
+            state.turn_count + 1,
             replay_from_turn=question_turn
         )
         if stream:
             await asyncio.to_thread(self.audio_handler.play_audio_stream, stream, session.meet, session.stop_event)
-
     @staticmethod
     def _looks_like_exit_request(transcript: str) -> bool:
         text = transcript.lower()

@@ -9,6 +9,7 @@ from typing import Optional, Dict, Any, Tuple
 from PIL import Image
 
 from .analysis_base import BaseAnalyzer, FileUploadMixin
+from app.agents.interview.config.constants import ServiceConfig
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ class GenderDetector(BaseAnalyzer, FileUploadMixin):
     
     def __init__(self):
         super().__init__(
-            model_name="gemini-2.0-flash-lite",
+            model_name=ServiceConfig.GEMINI_MODEL,
             temperature=0.1,
             safety_level="BLOCK_ONLY_HIGH"
         )

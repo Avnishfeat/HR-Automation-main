@@ -41,7 +41,7 @@ class BaseAnalyzer(ABC):
         Initialize base analyzer with Gemini configuration.
         """
         self.model = None
-        self.model_name = model_name
+        self.model_name = self._normalize_model_name(model_name)
         
         try:
             # Use centralized secrets manager
@@ -68,7 +68,7 @@ class BaseAnalyzer(ABC):
                 ]
             )
             
-            logger.info(f"{self.__class__.__name__} initialized with {model_name}")
+            logger.info(f"{self.__class__.__name__} initialized with {self.model_name}")
             
         except Exception as e:
             logger.error(f"Failed to initialize {self.__class__.__name__}: {e}")
@@ -77,6 +77,17 @@ class BaseAnalyzer(ABC):
                 "initialization_failed",
                 str(e)
             )
+
+    @staticmethod
+    def _normalize_model_name(model_name: str) -> str:
+        legacy_models = {
+            "gemini-2.0-flash-lite": "gemini-2.5-flash",
+            "models/gemini-2.0-flash-lite": "gemini-2.5-flash",
+        }
+        normalized = legacy_models.get(model_name, model_name)
+        if normalized != model_name:
+            logger.warning("Replacing unavailable Gemini model %s with %s", model_name, normalized)
+        return normalized
     
     # =========================================================================
     # ABSTRACT METHODS (Must be implemented by subclasses)
@@ -220,14 +231,12 @@ class BaseAnalyzer(ABC):
     
     def _create_error_result(
         self,
-        user_id: str,
         session_id: str,
         error_msg: str
     ) -> Dict[str, Any]:
         """Creates standardized error result for analysis methods."""
         return {
             "status": "error",
-            "user_id": user_id,
             "session_id": session_id,
             "error_message": error_msg,
             "analysis_timestamp": datetime.now().isoformat()
@@ -279,12 +288,11 @@ class BaseAnalyzer(ABC):
     
     def _get_report_directory(
         self,
-        user_id: str,
         session_id: str,
         subdir: str
     ) -> Path:
         """Gets and creates report directory path."""
-        report_dir = Path("data") / user_id / session_id / subdir
+        report_dir = Path("data") / session_id / "reports" / subdir
         return self._ensure_directory(report_dir)
     
     def _generate_section_header(

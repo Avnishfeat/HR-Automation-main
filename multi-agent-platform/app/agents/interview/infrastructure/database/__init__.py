@@ -1,3 +1,4 @@
-from .mongo_session_repository import MongoSessionRepository
+"""Database infrastructure package.
 
-__all__ = ['MongoSessionRepository']
+The interview agent is stateless; no database repository is exported here.
+"""

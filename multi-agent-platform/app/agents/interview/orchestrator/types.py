@@ -34,7 +34,6 @@ class InterviewState(BaseModel):
 class InterviewSession(NamedTuple):
     """Holds runtime objects that cannot be serialized to DB."""
     session_id: str
-    candidate_id: str
     meet: Any 
     stop_event: threading.Event
     #  NEW FIELD: Linked set for real-time flag monitoring

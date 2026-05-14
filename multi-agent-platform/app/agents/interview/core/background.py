@@ -2,15 +2,12 @@
 import logging
 import threading
 import asyncio
-from datetime import datetime
 from typing import Optional
-import concurrent.futures
+from pathlib import Path
 
 from app.agents.interview.config.constants import SessionStatus, BrowserConfig
 from app.agents.interview.core.limiter import get_concurrency_limiter
 from app.agents.interview.core.startup import get_services
-from app.core.exceptions import (ServiceInitializationError, MeetConnectionError, InterviewExecutionError)
-from app.agents.interview.models.analysis_schemas import CombinedAnalysisReport
 from app.utils.webhook_client import dispatch_webhook
 
 logger = logging.getLogger(__name__)
@@ -28,125 +25,84 @@ def run_analysis_in_thread(target_func, args_tuple, results_dict, key_name):
 
 def start_and_conduct_interview_task(
     session_id: str,
-    candidate_id: str,
     meet_link: str,
-    audio_device: Optional[int],
-    enable_video: bool,
-    video_capture_method: str,
-    job_role: str,
-    resume_content: str
+    webhook_url: Optional[str] = None,
+    audio_device: Optional[int] = None,
+    enable_video: bool = True,
+    video_capture_method: str = "javascript",
+    job_role: str = "Candidate",
+    resume_content: str = "Not provided"
 ):
-    """Background task - MongoDB Only Version"""
-    logger.info(f"[Task: {session_id}] Background task started (DB Mode)")
-    
-    # Get services
+    """Background task - Stateless Local Storage Version"""
+    logger.info(f"[Task: {session_id}] Background task started (Stateless)")
+
     services = get_services()
-    db_handler = services.db_handler
     meet_session_mgr = services.meet_session_mgr
     meet_orchestrator = services.meet_orchestrator
-    interview_service = services.interview_service
     combined_analyzer = services.combined_analyzer
-    transcript_analyzer = services.transcript_analyzer
+    interview_service = services.interview_service
     concurrency_limiter = get_concurrency_limiter()
 
-    
-    final_status = "error_unknown"
     snapshot_count = 0
     session_closed = False
-    session_finalized = False
+    interview_state_closed = False
+    interview_memory_cleaned = False
+    concurrency_released = False
+    candidate_name = interview_service.get_candidate_name(session_id) if interview_service else "Candidate"
+    transcript_text = ""
 
     try:
-        # Check services...
-        if not all([meet_session_mgr, meet_orchestrator, db_handler]):
-            raise ServiceInitializationError("Background", "Services missing")
-
         # 1. Start Bot
         success = meet_session_mgr.start_bot_session(
-            session_id, meet_link, candidate_id, audio_device,
-            enable_video, BrowserConfig.HEADLESS, video_capture_method
+            session_id=session_id,
+            meet_link=meet_link,
+            audio_device=audio_device,
+            enable_video=enable_video,
+            headless=BrowserConfig.HEADLESS,
+            video_capture_method=video_capture_method
         )
         if not success:
-            db_handler.update_session_status(session_id, SessionStatus.ERROR_JOIN_FAILED)
-            raise MeetConnectionError(session_id, "Bot join failed")
+            if webhook_url:
+                dispatch_webhook(webhook_url, {"event": "error", "session_id": session_id, "error": "Bot join failed"})
+            return
 
-        if concurrency_limiter:
-            concurrency_limiter.heartbeat(session_id)
+        candidate_joined = meet_session_mgr.wait_for_candidate(session_id)
+        if not candidate_joined:
+            if webhook_url:
+                dispatch_webhook(webhook_url, {
+                    "event": "error",
+                    "session_id": session_id,
+                    "status": SessionStatus.ERROR_CANDIDATE_NO_SHOW,
+                    "error": "Candidate did not join within the allowed time or participant validation failed"
+                })
+            return
 
-        # 2. Wait for Candidate
-        if not meet_session_mgr.wait_for_candidate(session_id, timeout=300):
-            active_session = meet_session_mgr.get_session(session_id) if meet_session_mgr else None
-            stop_requested = bool(
-                active_session
-                and active_session.get("stop_interview")
-                and active_session["stop_interview"].is_set()
-            )
-            if stop_requested:
-                logger.info(f"[Task: {session_id}] Stop requested before candidate joined")
-                final_status = SessionStatus.COMPLETED_NO_ANALYSIS
-                db_handler.update_session_status(session_id, SessionStatus.COMPLETED_NO_ANALYSIS)
-                return
-
-            db_handler.update_session_status(session_id, SessionStatus.ERROR_CANDIDATE_NO_SHOW)
-            raise InterviewExecutionError(session_id, "wait", "Candidate no-show")
-
-        db_handler.update_session_status(session_id, SessionStatus.ACTIVE_INTERVIEWING)
-        if concurrency_limiter:
-            concurrency_limiter.heartbeat(session_id)
-
-        # 3. Video Capture
         if enable_video:
             meet_session_mgr._start_candidate_video_capture(session_id)
 
-        # 4. Conduct Interview
+        # 2. Conduct Interview
         try:
-            # FIX: Optimized Thread Pool Size
-            # The issue: 50 workers * multiple Gemini API calls = connection pool exhaustion
-            # Solution: Use a smaller, more reasonable pool size (20 workers)
-            # This is enough for:
-            # - Audio generation (TTS) - I/O bound
-            # - Speech recognition (STT) - I/O bound  
-            # - Gemini API calls - I/O bound
-            # - Video capture - CPU bound (runs in separate daemon thread)
-            async def run_with_optimized_threads():
-                loop = asyncio.get_running_loop()
-                # Set to 20 workers (was 50, which was excessive)
-                # I/O-bound tasks don't need many threads since they wait on network
-                loop.set_default_executor(
-                    concurrent.futures.ThreadPoolExecutor(max_workers=20)
-                )
-                logger.info(f"[Task: {session_id}] Thread Pool configured with 20 workers")
+            async def run_conduct():
                 return await meet_orchestrator.conduct_interview(session_id=session_id)
 
-            result = asyncio.run(run_with_optimized_threads())
-            
-            final_status = result.get('status', 'completed_unknown')
-
+            asyncio.run(run_conduct())
         except Exception as e:
-            raise InterviewExecutionError(session_id, "orchestration", str(e))
-        
-        # 5. Cleanup - GET COUNTS BEFORE ENDING SESSION
+            logger.error(f"Orchestration failed: {e}", exc_info=True)
+
+        # 3. Cleanup & Finalize Local Data
         snapshot_count = meet_session_mgr.get_snapshot_count(session_id)
         background_person_count = meet_session_mgr.get_background_person_count(session_id)
         reconnection_count = meet_session_mgr.get_reconnection_count(session_id)
-        logger.info(f"[Task: {session_id}] Counts before cleanup - snapshots: {snapshot_count}, bg_persons: {background_person_count}, reconnects: {reconnection_count}")
-        
+
+        if interview_service:
+            candidate_name = interview_service.get_candidate_name(session_id)
+            interview_service.finalize_interview_session(session_id)
+
         if meet_session_mgr:
             meet_session_mgr.end_session(session_id)
             session_closed = True
-            
-        if interview_service:
-            interview_service.end_interview_session(session_id)
-            session_finalized = True
 
-        db_handler.update_session_status(session_id, SessionStatus.ACTIVE_ANALYZING)
-
-        # 6. Retrieve Transcript (FROM DB)
-        transcript_content = db_handler.get_transcript_text(session_id)
-        
-        if not transcript_content:
-            logger.warning(f"[Task: {session_id}] Transcript empty in DB. Attempting reconstruction...")
-
-        # 7. Run Analyses
+        # 4. Trigger Analyses (Read from Disk)
         analysis_results = {"behavioral": None, "transcript": None, "voice": None}
         analysis_threads = []
 
@@ -154,25 +110,28 @@ def start_and_conduct_interview_task(
         if enable_video and snapshot_count > 0:
             analysis_threads.append(threading.Thread(
                 target=run_analysis_in_thread,
-                args=(combined_analyzer.perform_behavioral_analysis, 
-                      (candidate_id, session_id), analysis_results, "behavioral"),
+                args=(combined_analyzer.perform_behavioral_analysis, (session_id,), analysis_results, "behavioral"),
                 daemon=True
             ))
 
         # Transcript & Voice
-        if transcript_content:
+        transcript_path = Path("data") / session_id / "transcript.txt"
+        if transcript_path.exists():
+            transcript_text = transcript_path.read_text(encoding="utf-8")
+
             # Transcript
             analysis_threads.append(threading.Thread(
                 target=run_analysis_in_thread,
-                args=(transcript_analyzer.analyze, 
-                      (session_id,), analysis_results, "transcript"),
+                args=(combined_analyzer.transcript_analyzer.analyze,
+                      (session_id, transcript_text, resume_content, job_role),
+                      analysis_results, "transcript"),
                 daemon=True
             ))
             # Voice
             analysis_threads.append(threading.Thread(
                 target=run_analysis_in_thread,
                 args=(combined_analyzer.perform_voice_authenticity_analysis,
-                      (candidate_id, session_id), analysis_results, "voice"),
+                      (session_id,), analysis_results, "voice"),
                 daemon=True
             ))
 
@@ -180,65 +139,69 @@ def start_and_conduct_interview_task(
         for t in analysis_threads: t.start()
         for t in analysis_threads: t.join()
 
-        # 8. Combine & Save (TO DB)
+        # 5. Combine & Dispatch Webhook
         try:
-            combined_report: CombinedAnalysisReport = combined_analyzer.combine_analyses(
+            combined_report = combined_analyzer.combine_analyses(
                 behavioral_result=analysis_results.get("behavioral"),
                 transcript_result=analysis_results.get("transcript"),
                 voice_result=analysis_results.get("voice"),
                 session_id=session_id,
-                candidate_id=candidate_id,
+                candidate_name=candidate_name,
                 background_person_count=background_person_count,
                 reconnection_count=reconnection_count
             )
-            
-            if combined_report:
-                logger.info(f"[Task: {session_id}] Analysis completed and saved by Analyzer.")
-                db_handler.update_session_status(session_id, SessionStatus.COMPLETED)
-            else:
-                logger.error(f"[Task: {session_id}] CombinedAnalyzer returned None.")
-                db_handler.update_session_status(session_id, SessionStatus.ERROR_ANALYSIS_EMPTY)
 
+            if combined_report and webhook_url:
+                report_data = combined_report.model_dump() if hasattr(combined_report, 'model_dump') else combined_report
+                logger.info(f"Dispatching final report to {webhook_url}")
+                webhook_sent = dispatch_webhook(webhook_url, {
+                    "event": "analysis_completed",
+                    "session_id": session_id,
+                    "transcript": transcript_text,
+                    "transcript_path": str(transcript_path),
+                    "analysis": report_data
+                })
+                if webhook_sent:
+                    _cleanup_in_memory_session(
+                        session_id=session_id,
+                        interview_service=interview_service,
+                        meet_session_mgr=meet_session_mgr,
+                        concurrency_limiter=concurrency_limiter,
+                    )
+                    interview_state_closed = True
+                    interview_memory_cleaned = True
+                    session_closed = True
+                    concurrency_released = True
         except Exception as e:
-            logger.error(f"[Task: {session_id}] Combine failed: {e}", exc_info=True)
-            db_handler.update_session_status(session_id, SessionStatus.ERROR_ANALYSIS_FAILED)
+            logger.error(f"Combined analysis/webhook failed: {e}")
 
     except Exception as e:
-        logger.error(f"FATAL ERROR [Task: {session_id}]: {e}", exc_info=True)
-        if db_handler:
-            db_handler.update_session_status(session_id, SessionStatus.ERROR_FATAL_TASK)
-            
-            # --- Fallback Webhook for Errors ---
-            try:
-                session_data = db_handler.get_session(session_id)
-                webhook_url = session_data.get("webhook_url") if session_data else None
-                if webhook_url:
-                    error_payload = {
-                        "event": "error",
-                        "session_id": session_id,
-                        "error": str(e),
-                        "status": "failed"
-                    }
-                    logger.info(f"[Task: {session_id}] Dispatching error webhook to {webhook_url}")
-                    dispatch_webhook(webhook_url, error_payload)
-            except Exception as webhook_err:
-                logger.error(f"[Task: {session_id}] Failed to dispatch error webhook: {webhook_err}", exc_info=True)
+        logger.error(f"FATAL ERROR: {e}", exc_info=True)
+        if webhook_url:
+            dispatch_webhook(webhook_url, {"event": "fatal_error", "session_id": session_id, "error": str(e)})
     finally:
-        # Emergency Cleanup
-        try:
-            if meet_session_mgr and not session_closed:
-                meet_session_mgr.end_session(session_id)
-        except Exception:
-            logger.warning(f"[Task: {session_id}] Emergency session cleanup failed", exc_info=True)
-
-        try:
-            if interview_service and not session_finalized:
+        if interview_service and not interview_state_closed:
+            try:
                 interview_service.end_interview_session(session_id)
-        except Exception:
-            logger.warning(f"[Task: {session_id}] Emergency interview finalization failed", exc_info=True)
+            except Exception as e:
+                logger.warning(f"Interview service cleanup failed for {session_id}: {e}")
+        elif interview_service and not interview_memory_cleaned:
+            try:
+                interview_service.cleanup_session_state(session_id)
+            except Exception as e:
+                logger.warning(f"Interview service memory cleanup failed for {session_id}: {e}")
+        if meet_session_mgr and not session_closed:
+            meet_session_mgr.end_session(session_id)
+        if concurrency_limiter and not concurrency_released:
+            concurrency_limiter.release(session_id)
 
-        try:
-            if concurrency_limiter:
-                concurrency_limiter.release(session_id)
-        except Exception:
-            logger.warning(f"[Task: {session_id}] Failed to release concurrency slot", exc_info=True)
+
+def _cleanup_in_memory_session(session_id, interview_service, meet_session_mgr, concurrency_limiter):
+    """Clear per-session memory after final report delivery succeeds."""
+    if interview_service:
+        interview_service.cleanup_session_state(session_id)
+    if meet_session_mgr:
+        meet_session_mgr.end_session(session_id)
+    if concurrency_limiter:
+        concurrency_limiter.release(session_id)
+    logger.info(f"In-memory session data cleaned after webhook success for {session_id}")

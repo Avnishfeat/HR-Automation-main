@@ -7,8 +7,6 @@ import urllib3
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-from app.agents.interview.core.ports.session_repository import SessionRepository
-from app.agents.interview.infrastructure.database.mongo_session_repository import MongoSessionRepository
 from app.agents.interview.services.audio.audio_handler import AudioHandler
 from app.agents.interview.services.interview_service import InterviewService
 from app.agents.interview.services.analysis.transcript_analyzer import TranscriptAnalyzer
@@ -27,7 +25,6 @@ logger = logging.getLogger(__name__)
 
 class ServiceContainer:
     """Container for all application services"""
-    db_handler: Optional[SessionRepository] = None 
     
     interview_service: Optional[InterviewService] = None
     transcript_analyzer: Optional[TranscriptAnalyzer] = None
@@ -42,43 +39,33 @@ services = ServiceContainer()
 def initialize_services():
     try:
         # FIX 1: Increase urllib3 connection pool size BEFORE initializing services
-        # This prevents "Connection pool is full" warnings
-        # Default pool size is 10, we increase to 100 to handle concurrent Gemini API calls
         urllib3.PoolManager(num_pools=50, maxsize=100)
         logger.info(" urllib3 connection pool configured (maxsize=100)")
         
-        # 1. Database (Infrastructure Layer)
-        try:
-            services.db_handler = MongoSessionRepository()
-            logger.info("MongoSessionRepository initialized")
-            
-            # Initialize concurrency limiter with DB handler
-            init_concurrency_limiter(services.db_handler, max_sessions=5)
-        except Exception as e:
-            raise ServiceInitializationError("Database Repository", str(e))
+        # Initialize concurrency limiter
+        init_concurrency_limiter(max_sessions=5)
         
-        # 2. Analysis Services (Initialize BEFORE InterviewService)
+        # 2. Analysis Services
         try:
-            services.transcript_analyzer = TranscriptAnalyzer(services.db_handler)
-            services.combined_analyzer = CombinedAnalyzer(db_handler=services.db_handler)
+            services.transcript_analyzer = TranscriptAnalyzer()
+            services.combined_analyzer = CombinedAnalyzer()
             logger.info("Analysis services initialized (Singleton)")
         except Exception as e:
             raise ServiceInitializationError("Analysis Services", str(e))
             
         # 3. Session & Audio Managers
         try:
-            services.meet_session_mgr = MeetSessionManager(services.db_handler)
+            services.meet_session_mgr = MeetSessionManager()
             services.audio_handler = AudioHandler()
-            services.stt_service = STTService(services.meet_session_mgr, services.db_handler)
+            services.stt_service = STTService(services.meet_session_mgr)
             
             logger.info("Session & Audio managers initialized")
         except Exception as e:
             raise ServiceInitializationError("Session/Audio Managers", str(e))
         
-        # 4. Core Logic Services (Dependency Injection)
+        # 4. Core Logic Services
         try:
             services.interview_service = InterviewService(
-                db_handler=services.db_handler,
                 combined_analyzer=services.combined_analyzer 
             )
             logger.info("Core Interview Service initialized (with injected Analyzer)")
@@ -87,7 +74,7 @@ def initialize_services():
         
         # 5. Audio Output (TTS)
         try:
-            services.tts_service = TTSService(services.db_handler)
+            services.tts_service = TTSService()
             logger.info("TTS service initialized")
         except Exception as e:
             raise ServiceInitializationError("Audio Services", str(e))
