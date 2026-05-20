@@ -128,5 +128,14 @@ chrome_profile/
 uploads/
 service_account.json
 
-.gemini
+tests
 tests/
+uploads/
+/.antigravitycli
+.gemini
+/.data
+deploy/
+logs/
+pytest.ini
+new_analysis_schema.json
+scripts/

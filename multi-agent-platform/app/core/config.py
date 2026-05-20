@@ -1,7 +1,7 @@
 from typing import Any, Optional
 
 from pydantic import field_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     # App Settings
@@ -10,10 +10,6 @@ class Settings(BaseSettings):
     APP_PORT: int = 8048
     DEBUG: bool = True
     ENVIRONMENT: str = "development"
-    
-    # Database
-    MONGODB_URL: str
-    DATABASE_NAME: str
     
     GENAI_MODEL: str = "gemini-2.5-flash"
     # LLM API Keys
@@ -34,13 +30,18 @@ class Settings(BaseSettings):
     GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = None
     SPEECH_API_VERSION: str = "v2"
     
-    # Chrome/Selenium Settings
+    # Browser Settings
     CHROME_PROFILE_PATH: str = "./chrome_profile"
     HEADLESS_MODE: bool = False
     
     # Interview Settings
     MAX_CONCURRENT_INTERVIEWS: int = 5
     DEFAULT_INTERVIEW_DURATION_MINUTES: int = 30
+    
+    # Actionabl Webhook Integration
+    ACTIONABL_API_URL: Optional[str] = None
+    ACTIONABL_AUTH_ID: Optional[str] = None
+    ACTIONABL_AUTH_TOKEN: Optional[str] = None
 
     @field_validator("DEBUG", "HEADLESS_MODE", mode="before")
     @classmethod
@@ -74,9 +75,10 @@ class Settings(BaseSettings):
         valid_regions = {"us", "eu", "global"}
         return normalized if normalized in valid_regions else "us"
     
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
-        extra = "ignore"
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+        extra="ignore"
+    )
 
 settings = Settings()

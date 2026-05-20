@@ -3,7 +3,7 @@ from typing import Dict, Any
 class PromptTemplates:
     """Central repository for all analysis prompts."""
     
-    VERSION = "2.2.0" # Bumped version for HR screening
+    VERSION = "3.0.0" # Updated for single JSON output
     
     @staticmethod
     def behavioral_screening(num_images: int) -> str:
@@ -120,9 +120,19 @@ Analyze for:
 Provide ONLY JSON output."""
     
     @staticmethod
-    def hr_transcript_analysis(transcript_text: str, resume_excerpt: str, job_role: str) -> str:
-        """Prompt for HR screening transcript analysis."""
-        return f"""You are an expert HR recruiter analyzing a screening interview transcript for the position of **{job_role}**.
+    def final_combined_analysis(transcript_text: str, resume_excerpt: str, job_role: str, session_id: str, candidate_name: str, candidate_email: str, duration_sec: int, ended_early: bool, reconnections: int, background_persons: int) -> str:
+        """Single prompt for the final combined JSON analysis."""
+        return f"""You are an expert HR recruiter and technical evaluator.
+
+**Context:**
+- Session ID: {session_id}
+- Candidate Name: {candidate_name}
+- Candidate Email: {candidate_email}
+- Job Role: {job_role}
+- Duration (sec): {duration_sec}
+- Ended Early: {str(ended_early).lower()}
+- Reconnections: {reconnections}
+- Background Persons Detected: {background_persons}
 
 **Resume Context:**
 {resume_excerpt}
@@ -131,108 +141,55 @@ Provide ONLY JSON output."""
 {transcript_text}
 
 **Your Task:**
-Analyze the HR screening interview conversation between the Interviewer (Assistant) and Candidate (User). Focus on HR screening criteria, NOT technical skills.
+Analyze the interview transcript and performance. Provide the output EXACTLY as the JSON schema below, and NOTHING ELSE.
 
-**HR SCREENING EVALUATION CRITERIA:**
+```json
+{{
+  "session_id": "{session_id}",
+  "candidate": {{
+    "name": "{candidate_name}",
+    "email": "{candidate_email}",
+    "role": "{job_role}"
+  }},
+  "status": {{
+    "completed": {"false" if ended_early else "true"},
+    "ended_early": {str(ended_early).lower()},
+    "duration_sec": {duration_sec}
+  }},
+  "scores": {{
+    "overall": <float 1.0-5.0>,
+    "technical": <float 1.0-5.0>,
+    "communication": <float 1.0-5.0>,
+    "behavioral": <float 1.0-5.0>,
+    "authenticity": <float 1.0-5.0>
+  }},
+  "flags": [
+    "<string, e.g., unable_to_explain_projects, ended_interview_early, etc.>"
+  ],
+  "summary": "<string: concise 2-3 sentence summary of the performance>",
+  "recommendation": "<string: hire, reject, or review>",
+  "transcript": [
+    {{
+      "turn": <int>,
+      "speaker": "<string: assistant or candidate>",
+      "timestamp": "<string: ISO 8601 or from transcript log>",
+      "message": "<string: the message text>",
+      "type": "<string: optional, e.g., security_check if it was a liveness spot check>"
+    }}
+  ],
+  "metadata": {{
+    "reconnections": {reconnections},
+    "background_persons": {background_persons}
+  }}
+}}
+```
 
-1. **Communication Skills**
-   - Clarity and articulation
-   - Professionalism in language
-   - Ability to express thoughts coherently
-   - Active listening and responsiveness
-
-2. **Cultural Fit & Work Style**
-   - Team collaboration preferences
-   - Work environment preferences
-   - Values alignment
-   - Adaptability and flexibility
-
-3. **Motivation & Interest**
-   - Genuine interest in the role
-   - Understanding of the position
-   - Career goals alignment
-   - Reasons for job change
-
-4. **Professionalism**
-   - Interview demeanor
-   - Preparedness
-   - Punctuality and courtesy
-   - Handling of difficult questions
-
-5. **Career Background**
-   - Career progression logic
-   - Relevant experience
-   - Achievements and contributions
-   - Resume alignment
-
-**Analysis Guidelines:**
-- **Be Balanced:** Consider both positives and areas of concern
-- **Context Matters:** This is a screening interview, not a final interview
-- **Focus on Red Flags:** Identify any serious concerns (dishonesty, unprofessionalism, poor communication)
-- **Look for Green Flags:** Strong communication, clear motivation, good cultural fit
-
-**CRITICAL**: Provide your response in the exact Markdown format below:
-
----
-
-## Overall Performance
-
-[Provide 3-4 sentences summarizing the candidate's performance in this HR screening. Address their communication quality, professionalism, and overall suitability for proceeding to next rounds.]
-
-## Communication Skills
-
-[Evaluate clarity, articulation, professionalism. Rate their ability to express themselves effectively. 2-3 sentences.]
-
-## Cultural Fit Assessment
-
-[Assess their work style preferences, team collaboration approach, and alignment with typical professional environments. 2-3 sentences.]
-
-## Motivation & Interest
-
-[Evaluate their genuine interest in the role, understanding of the position, and career goals. Are they just job hunting or specifically interested? 2-3 sentences.]
-
-## Professionalism
-
-[Assess interview demeanor, preparedness, and professional conduct. 2 sentences.]
-
-## Strengths
-
-- [Clear strength 1 - be specific]
-- [Clear strength 2 - be specific]
-- [Clear strength 3 - be specific]
-
-## Concerns / Red Flags
-
-- [Any concern 1 - or write "None identified" if genuinely no concerns]
-- [Any concern 2]
-
-## Recommendations
-
-- [Specific recommendation 1: e.g., "Proceed to technical round" or "Request additional references"]
-- [Specific recommendation 2: e.g., "Probe deeper on reason for leaving current role"]
-- [Specific recommendation 3: e.g., "Assess technical skills in next round"]
-
-## Hiring Decision
-
-**Recommendation:** [Strong Yes / Yes / Maybe / No / Strong No]
-
-**Reasoning:** [2-3 sentences explaining the decision. Be clear about whether they should proceed to next round, be flagged for review, or be rejected.]
-
----
-
-**Important Notes:**
-- Ignore any system logs, timestamps, or technical noise in the transcript
-- Focus ONLY on the actual conversation content
-- Be fair but honest in your assessment
-- If the transcript is too short or incomplete, note this in your analysis
-- Do NOT assess technical skills - this is an HR screening only
+**Instructions:**
+- Parse the transcript text to reconstruct the `transcript` array exactly.
+- Assign scores out of 5.0 based on the candidate's answers. If they could not answer technical questions, give a low technical score.
+- Ensure the output is ONLY valid JSON.
 """
-    
-    @staticmethod
-    def transcript_analysis(transcript_text: str, resume_excerpt: str) -> str:
-        """Legacy method for backward compatibility - redirects to HR version."""
-        return PromptTemplates.hr_transcript_analysis(transcript_text, resume_excerpt, "Unknown Position")
-    
+
     @classmethod
     def get_prompt_metadata(cls) -> Dict[str, Any]:
         """Returns metadata about prompt templates."""
@@ -241,8 +198,7 @@ Analyze the HR screening interview conversation between the Interviewer (Assista
             "templates": {
                 "behavioral_screening": "Fairness-optimized screening analysis",
                 "voice_authenticity": "Voice detection with forensic approach",
-                "hr_transcript_analysis": "HR screening interview assessment",
-                "transcript_analysis": "Legacy compatibility wrapper"
+                "final_combined_analysis": "Final JSON combined schema output"
             }
         }
     
@@ -250,65 +206,3 @@ Analyze the HR screening interview conversation between the Interviewer (Assista
     def validate_prompt_version(cls, required_version: str) -> bool:
         """Validates prompt template version compatibility."""
         return cls.VERSION >= required_version
-    
-    @staticmethod
-    def hr_transcript_analysis(transcript_text: str, resume_excerpt: str, job_role: str) -> str:
-        """Prompt for HR screening transcript analysis with Authenticity & Silence checks."""
-        return f"""You are an expert HR recruiter analyzing a screening interview transcript for the position of **{job_role}**.
-
-**Resume Context:**
-{resume_excerpt}
-
-**Raw Interview Transcript:**
-{transcript_text}
-
-**Your Task:**
-Analyze the HR screening interview conversation. Focus on HR screening criteria, cultural fit, and **authenticity**.
-
-**CRITICAL: AUTHENTICITY & SILENCE HANDLING**
-1.  **Detect AI/Scripts:** Look for "perfect" but empty grammar, lack of personal "I" statements, and unnatural phrasing like "In conclusion."
-2.  **Forgive Pauses:** **Do NOT penalize** the candidate for silence under 10 seconds. Interpret `[No response]` or brief gaps followed by an answer as **thoughtful reflection**, not hesitation.
-
-**CRITICAL OUTPUT RULES:**
-- You MUST use the exact headers below (starts with ##).
-- Under 'Authenticity Check', give a score (1-10) where 10 is Natural/Human and 1 is Robotic/Scripted.
-
-**REQUIRED MARKDOWN FORMAT:**
-
----
-
-## Overall Performance
-[Provide 3-4 sentences summarizing the candidate's performance. Address communication quality and overall suitability.]
-
-## Authenticity Check
-[Analyze if answers sound natural or AI-generated. Mention specific phrases if they sounded scripted.]
-Score: [X]/10
-Flag: [True/False] (True if significant AI usage is suspected)
-
-## Communication Skills
-[Evaluate clarity, articulation, and professionalism. Rate ability to express thoughts coherently.]
-
-## Cultural Fit Assessment
-[Assess work style preferences, team collaboration approach, and alignment with professional environments.]
-
-## Motivation & Interest
-[Evaluate genuine interest in the role, understanding of the position, and career goals.]
-
-## Strengths
-- [Strength 1]
-- [Strength 2]
-
-## Weaknesses
-- [Weakness 1]
-- [Weakness 2]
-
-## Recommendations
-- [Specific recommendation 1]
-- [Specific recommendation 2]
-
-## Hiring Decision
-**Recommendation:** [Yes / Maybe / No]
-**Reasoning:** [2-3 sentences explaining the decision.]
-
----
-"""

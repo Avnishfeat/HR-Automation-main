@@ -1,11 +1,11 @@
 import logging
 import time
 import requests
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
-def dispatch_webhook(webhook_url: str, payload: Dict[str, Any], max_retries: int = 3, initial_backoff: float = 2.0) -> bool:
+def dispatch_webhook(webhook_url: str, payload: Dict[str, Any], max_retries: int = 3, initial_backoff: float = 2.0, headers: Optional[Dict[str, str]] = None) -> bool:
     """
     Synchronously dispatches a webhook to the provided URL with the given payload.
     Implements a retry mechanism for robust delivery.
@@ -18,7 +18,7 @@ def dispatch_webhook(webhook_url: str, payload: Dict[str, Any], max_retries: int
         try:
             logger.info(f"Dispatching webhook to {webhook_url} (Attempt {attempt}/{max_retries})")
             # Use a timeout so background task doesn't hang indefinitely
-            response = requests.post(webhook_url, json=payload, timeout=10)
+            response = requests.post(webhook_url, json=payload, timeout=10, headers=headers)
             
             if response.status_code >= 200 and response.status_code < 300:
                 logger.info(f"Webhook dispatched successfully: {response.status_code}")
@@ -36,3 +36,4 @@ def dispatch_webhook(webhook_url: str, payload: Dict[str, Any], max_retries: int
             
     logger.error(f"Failed to dispatch webhook after {max_retries} attempts.")
     return False
+

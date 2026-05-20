@@ -93,10 +93,12 @@ class InterviewService:
             for sentence in sentence_generator:
                 if sentence:
                     parts.append(sentence)
+                    logger.info(f"[Bot Stream Chunk] {sentence.strip()}")
                 yield sentence
         finally:
             assistant_text = " ".join(part.strip() for part in parts if part and part.strip()).strip()
             if assistant_text:
+                logger.info(f"[Bot Stream Full] {assistant_text}")
                 self.log_assistant_message(session_id, assistant_text, turn_count)
 
     def _replay_question(self, session_id, turn_count, replay_from_turn):

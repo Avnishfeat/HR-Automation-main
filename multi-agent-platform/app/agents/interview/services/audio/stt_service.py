@@ -32,7 +32,7 @@ try:
 except ImportError:
     V2_AVAILABLE = False
 
-from app.agents.interview.infrastructure.selenium.meet_session_manager import MeetSessionManager
+from app.agents.interview.infrastructure.browser.meet_session_manager import MeetSessionManager
 from app.agents.interview.utils.audio_file_utils import get_user_audio_path_for_stt, save_audio_file
 from app.agents.interview.config.constants import AudioConfig, ServiceConfig
 from app.core.config import settings
@@ -48,6 +48,9 @@ class STTService:
             logger.error(f"Invalid API version: {self.api_version}, defaulting to v2")
             self.api_version = "v2"
         
+        self.speech_client = None
+        self.recognizer = None
+        
         logger.info(f"STT Service using Speech API: {self.api_version.upper()}")
         
         if self.api_version == "v2":
@@ -61,6 +64,7 @@ class STTService:
 
     def _find_recording_device(self) -> Optional[int]:
         try:
+            import os
             target_name = AudioConfig.RECORDING_DEVICE_NAME.lower()
             devices = sd.query_devices()
             preferred_hostapis = ['Windows WASAPI', 'Windows DirectSound', 'MME']
@@ -75,6 +79,15 @@ class STTService:
                 if d['max_input_channels'] > 0 and target_name in d['name'].lower():
                     self.samplerate = int(d['default_samplerate'])
                     return d['index']
+                    
+            if os.name != 'nt':
+                # Fallback to the explicit PulseAudio device on Linux
+                # since we set PULSE_SOURCE in the environment
+                for d in devices:
+                    if d['name'] == 'pulse' and d['max_input_channels'] > 0:
+                        logger.info("Falling back to PulseAudio device for STT recording")
+                        self.samplerate = int(d['default_samplerate']) or 48000
+                        return d['index']
             return None
         except Exception as e:
             logger.error(f"Error finding STT audio device: {e}")
@@ -136,7 +149,7 @@ class STTService:
             stream = sd.InputStream(samplerate=self.samplerate, device=input_device, channels=1, callback=audio_callback, dtype='float32')
             stream.start(); recording_start = datetime.now()
             stt_thread = threading.Thread(target=stt_processor, daemon=True); stt_thread.start()
-            self._monitor_recording(recorded_chunks, session, stop_event, recording_start)
+            self._monitor_recording(recorded_chunks, stop_event, recording_start)
             stream.stop(); stream.close(); audio_queue.put(None); stt_thread.join(timeout=10)
             if recorded_chunks: threading.Thread(target=self._save_recorded_audio, args=(recorded_chunks, session_id, turn_count, is_follow_up), daemon=True).start()
             final_transcript = " ".join(transcript_parts).strip()
@@ -175,45 +188,41 @@ class STTService:
             stream = sd.InputStream(samplerate=self.samplerate, device=input_device, channels=1, callback=audio_callback, dtype='float32')
             stream.start(); recording_start = datetime.now()
             stt_thread = threading.Thread(target=stt_processor, daemon=True); stt_thread.start()
-            self._monitor_recording(recorded_chunks, session, stop_event, recording_start)
+            self._monitor_recording(recorded_chunks, stop_event, recording_start)
             stream.stop(); stream.close(); audio_queue.put(None); stt_thread.join(timeout=10)
             if recorded_chunks: threading.Thread(target=self._save_recorded_audio, args=(recorded_chunks, session_id, turn_count, is_follow_up), daemon=True).start()
             final_transcript = " ".join(transcript_parts).strip()
             return recording_start, final_transcript if final_transcript else "[No response]"
         except Exception: return None, "[Error]"
 
-    def _monitor_recording(self, recorded_chunks, session, stop_event, recording_start):
+    def _monitor_recording(self, recorded_chunks, stop_event, recording_start):
         speech_detected = False; silence_start_time = None; speech_start_time = None
+        log_interval = 0
         while True:
             time.sleep(0.05)
-            if not session or (stop_event and stop_event.is_set()): break
-            if not self._is_candidate_present(session): break
+            if stop_event and stop_event.is_set(): break
             elapsed = (datetime.now() - recording_start).total_seconds()
             if elapsed >= AudioConfig.MAX_RECORDING_DURATION_SEC: break
             if len(recorded_chunks) > 5:
+                # Log volume roughly every second
+                log_interval += 1
                 volume = np.sqrt(np.mean(np.concatenate(recorded_chunks[-5:], axis=0)**2))
+                if log_interval % 20 == 0:
+                    logger.info(f"[STT] Current audio volume: {volume:.5f} (Threshold: {AudioConfig.VOLUME_THRESHOLD})")
+                
                 if volume > AudioConfig.VOLUME_THRESHOLD:
                     silence_start_time = None
                     if not speech_detected:
                         if speech_start_time is None: speech_start_time = time.time()
-                        if (time.time() - speech_start_time) >= AudioConfig.MIN_SPEECH_DURATION_SEC: speech_detected = True
+                        if (time.time() - speech_start_time) >= AudioConfig.MIN_SPEECH_DURATION_SEC: 
+                            speech_detected = True
+                            logger.info("[STT] Speech detected.")
                 elif speech_detected:
                     if silence_start_time is None: silence_start_time = time.time()
-                    if elapsed >= AudioConfig.MIN_RECORDING_SEC and (time.time() - silence_start_time) > AudioConfig.SILENCE_THRESHOLD_SEC: break
+                    if elapsed >= AudioConfig.MIN_RECORDING_SEC and (time.time() - silence_start_time) > AudioConfig.SILENCE_THRESHOLD_SEC: 
+                        logger.info("[STT] Silence threshold reached. Stopping recording.")
+                        break
                 else: speech_start_time = None
-
-    def _is_candidate_present(self, session: dict) -> bool:
-        try:
-            controller = session.get('controller')
-            lock = session.get('lock')
-            if not controller:
-                return True
-            if lock:
-                with lock:
-                    return controller.get_participant_count() >= 2
-            return controller.get_participant_count() >= 2
-        except Exception:
-            return True
 
     def _save_recorded_audio(self, recorded_chunks: list, session_id: str, turn_count: int, is_follow_up: bool):
         try:

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 from typing import List, Optional, Union, Dict, Any
 
 class JobDescriptionDetail(BaseModel):
@@ -45,8 +45,7 @@ class MatchResponse(BaseModel):
     experience_years: int
     reasons: List[str]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class TalentMatchApiResponse(BaseModel):
     """The final, wrapped API response schema."""

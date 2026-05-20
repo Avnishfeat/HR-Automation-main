@@ -2,7 +2,7 @@
 
 import logging
 import re
-import threading
+import asyncio
 from typing import Optional, Callable
 from collections import Counter
 
@@ -19,7 +19,7 @@ class ParticipantMonitor:
         self,
         session_id: str,
         meet_controller,
-        stop_event: threading.Event,
+        stop_event: asyncio.Event,
         # Callback now accepts (count, violation_type, details)
         on_violation: Optional[Callable[[int, str, list], None]] = None, 
         bot_name: str = "AI Bot" # Pass bot name to exclude from checks
@@ -30,36 +30,34 @@ class ParticipantMonitor:
         self.on_violation = on_violation
         self.bot_name = bot_name
         
-        self.monitor_thread: Optional[threading.Thread] = None
+        self.monitor_task: Optional[asyncio.Task] = None
         self.violation_detected = False
         self.total_checks = 0
     
     def start_monitoring(self):
-        if self.monitor_thread and self.monitor_thread.is_alive(): return
-        self.monitor_thread = threading.Thread(
-            target=self._monitoring_loop,
-            daemon=True,
+        if self.monitor_task and not self.monitor_task.done(): return
+        self.monitor_task = asyncio.create_task(
+            self._monitoring_loop(),
             name=f"ParticipantMonitor-{self.session_id}"
         )
-        self.monitor_thread.start()
     
     def stop_monitoring(self):
-        if self.monitor_thread and self.monitor_thread.is_alive():
-            self.monitor_thread.join(timeout=3)
+        if self.monitor_task and not self.monitor_task.done():
+            self.monitor_task.cancel()
     
-    def _monitoring_loop(self):
+    async def _monitoring_loop(self):
         check_interval = LoggingConfig.PARTICIPANT_CHECK_LOG_INTERVAL_SEC
         
         while not self.stop_event.is_set():
             try:
                 self.total_checks += 1
-                current_count = self.meet.get_participant_count()
+                current_count = await self.meet.get_participant_count()
                 
                 if self.total_checks % 10 == 0:
                     logger.debug(f"Participant Check: {current_count}")
 
                 if current_count > ParticipantThresholds.MAX_VALID_COUNT:
-                    raw_names = self.meet.get_active_participant_names()
+                    raw_names = await self.meet.get_active_participant_names()
                     
                     candidate_names = [
                         n for n in raw_names 
@@ -78,11 +76,21 @@ class ParticipantMonitor:
                     self._handle_violation(current_count, violation_type, candidate_names)
                     break
 
-                if self.stop_event.wait(check_interval): break
+                try:
+                    await asyncio.wait_for(self.stop_event.wait(), timeout=check_interval)
+                    break
+                except asyncio.TimeoutError:
+                    pass
                     
+            except asyncio.CancelledError:
+                break
             except Exception as e:
                 logger.error(f"Error in monitoring loop: {e}")
-                if self.stop_event.wait(check_interval): break
+                try:
+                    await asyncio.wait_for(self.stop_event.wait(), timeout=check_interval)
+                    break
+                except asyncio.TimeoutError:
+                    pass
 
     def _analyze_violation_type(self, names: list) -> str:
         """
@@ -135,6 +143,6 @@ class ParticipantMonitor:
 
     def get_status(self) -> dict:
         return {
-            'active': self.monitor_thread and self.monitor_thread.is_alive(),
+            'active': self.monitor_task is not None and not self.monitor_task.done(),
             'violation': self.violation_detected
         }

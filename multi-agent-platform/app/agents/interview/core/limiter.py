@@ -9,7 +9,7 @@ Provides:
 
 import logging
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -150,7 +150,7 @@ class ConcurrencyLimiter:
         Returns number of sessions cleaned up.
         """
         try:
-            cutoff = datetime.utcnow() - timedelta(minutes=max_age_minutes)
+            cutoff = datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
             stale_keys = []
             for sid, data in self._active_sessions.items():
                 if data["last_heartbeat"] < cutoff:

@@ -1,5 +1,7 @@
 # app/main.py
 
+import os
+import subprocess
 from contextlib import asynccontextmanager
 import logging
 
@@ -8,6 +10,11 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
+
+# Force PulseAudio/PipeWire routing for sounddevice (used by the python bot)
+if os.name != 'nt':
+    os.environ["PULSE_SINK"] = "BotSpeaker"
+    os.environ["PULSE_SOURCE"] = "BotMic.monitor"
 
 from app.agents.criteria_agent.router import router as criteria_router
 from app.agents.example_agent.router import router as example_agent_router
@@ -21,7 +28,6 @@ from app.agents.resume_matcher.router import router as resume_matcher_router
 from app.core.config import settings
 from app.core.dependencies import get_websocket_manager
 from app.core.logging import setup_logging
-from app.services.database import DatabaseService
 
 logger = logging.getLogger(__name__)
 
@@ -32,14 +38,12 @@ async def lifespan(app: FastAPI):
     setup_logging()
 
     logger.info("Starting Multi-Agent Platform...")
-    await DatabaseService.connect_db(settings.MONGODB_URL)
 
     try:
         initialize_interview_services()
         logger.info("Interview services initialized")
     except Exception:
         logger.exception("Failed to initialize interview services")
-        await DatabaseService.close_db()
         raise
 
     logger.info("Application started successfully")
@@ -47,7 +51,6 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("Shutting down...")
-    await DatabaseService.close_db()
     logger.info("Application shut down successfully")
 
 

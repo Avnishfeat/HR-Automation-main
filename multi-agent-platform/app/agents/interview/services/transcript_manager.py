@@ -103,7 +103,7 @@ class TranscriptManager:
             lines = []
             lines.append(f"--- Interview Transcript ---")
             lines.append(f"Session ID: {session_id}")
-            lines.append(f"Date: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
+            lines.append(f"Date: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
             lines.append("--------------------------------\n")
 
             # Append Conversation
@@ -112,7 +112,7 @@ class TranscriptManager:
                 text = msg.get("text", "")
                 turn = msg.get("turn", "?")
                 ts = msg.get("timestamp")
-                ts_str = ts.strftime('%H:%M:%S') if ts else "N/A"
+                ts_str = ts.strftime('%H:%M:%S UTC') if ts else "N/A"
 
                 lines.append(f"[{ts_str}] (Turn {turn}) {role}:\n{text}\n")
 

@@ -10,7 +10,7 @@ from datetime import datetime
 # Updated imports to point to new locations
 from app.agents.interview.services.analysis.liveness_service import LivenessChallengeService
 from app.agents.interview.core.limiter import get_concurrency_limiter
-from app.agents.interview.infrastructure.selenium.meet_session_manager import MeetSessionManager
+from app.agents.interview.infrastructure.browser.meet_session_manager import MeetSessionManager
 from app.agents.interview.services.interview_service import InterviewService
 from app.agents.interview.services.audio.stt_service import STTService
 from app.agents.interview.services.audio.audio_handler import AudioHandler
@@ -37,9 +37,7 @@ logger = logging.getLogger(__name__)
 # --- NEW: Thread-Safe Proxy ---
 class ThreadSafeControllerProxy:
     """
-    Wraps the MeetController to ensure all method calls are protected by the session lock.
-    This prevents the ParticipantMonitor (thread) and VideoCapture (thread) from 
-    crashing the Selenium connection pool.
+    Wraps the MeetController to ensure all method calls are protected by the asyncio session lock.
     """
     def __init__(self, controller, lock):
         self._controller = controller
@@ -51,13 +49,20 @@ class ThreadSafeControllerProxy:
         
         # If it's a method, wrap it in the lock
         if callable(attr):
-            def wrapper(*args, **kwargs):
+            async def wrapper(*args, **kwargs):
                 # Check if lock is valid
                 if self._lock:
-                    with self._lock:
-                        return attr(*args, **kwargs)
+                    async with self._lock:
+                        # Since all MeetController methods are now async, we must await them
+                        if asyncio.iscoroutinefunction(attr):
+                            return await attr(*args, **kwargs)
+                        else:
+                            return attr(*args, **kwargs)
                 else:
-                    return attr(*args, **kwargs)
+                    if asyncio.iscoroutinefunction(attr):
+                        return await attr(*args, **kwargs)
+                    else:
+                        return attr(*args, **kwargs)
             return wrapper
         
         # If it's a property, return it as is
@@ -107,6 +112,7 @@ class MeetInterviewOrchestrator:
         state = self.state_mgr.load_or_init_state(session_id)
         duration_seconds = interview_duration_minutes * 60
         transcript_log = []
+        session = None
         
         try:
             # Get session with ThreadSafe Proxy
@@ -191,9 +197,7 @@ class MeetInterviewOrchestrator:
                     logger.info("Greeting aborted due to malpractice")
                 return False
 
-            await asyncio.to_thread(session.meet.enable_microphone)
-            await asyncio.sleep(InterviewTiming.MIC_TOGGLE_DELAY_SEC)
-            
+            # Note: _play_text_with_cache now handles mic enable/disable
             success = await self._play_text_with_cache(
                 greeting, 
                 StaticMessages.CACHE_KEY_INTRO_GREETING, 
@@ -215,13 +219,6 @@ class MeetInterviewOrchestrator:
                         return False
                 return False
             
-            # FIX: Disable mic after greeting so the VB-Audio cable is clean
-            # before STT recording starts in the introduction phase.
-            # Without this, residual bot audio on the cable triggers false
-            # speech detection followed by immediate silence cutoff.
-            await asyncio.to_thread(session.meet.disable_microphone)
-            await asyncio.sleep(0.5)  # Let the virtual cable drain
-            
             self.state_mgr.update_turn_count(state, state.turn_count + 1)
             return True
 
@@ -242,20 +239,16 @@ class MeetInterviewOrchestrator:
                     session.session_id, response.transcript
                 )
                 self._log_transcript(session.session_id, response)
-                await asyncio.to_thread(session.meet.disable_microphone)
+                await session.meet.disable_microphone()
                 return True
             
             logger.warning(f"Invalid intro (attempt {attempt}/{InterviewTiming.MAX_INTRO_ATTEMPTS}). Reprompting...")
             self.state_mgr.update_turn_count(state, state.turn_count + 1)
             
-            await asyncio.to_thread(session.meet.enable_microphone)
-            await asyncio.sleep(InterviewTiming.MIC_TOGGLE_DELAY_SEC)
+            # Note: _play_text_with_cache now handles mic enable/disable
             await self._play_text_with_cache(
                 StaticMessages.INTRO_REPROMPT, StaticMessages.CACHE_KEY_INTRO_REPROMPT, session, state.turn_count
             )
-            # FIX: Disable mic after reprompt playback, same reasoning as greeting
-            await asyncio.to_thread(session.meet.disable_microphone)
-            await asyncio.sleep(0.5)  # Let virtual cable drain
             self.state_mgr.update_turn_count(state, state.turn_count + 1)
 
         return True
@@ -371,14 +364,14 @@ class MeetInterviewOrchestrator:
         challenge_type = "look_left" 
         await asyncio.sleep(1.5) 
         
-        snapshot_bytes = self.session_mgr.capture_snapshot_now(session.session_id)
-        
+        snapshot_bytes = await self.session_mgr.capture_snapshot_now(session.session_id)
+
         if not snapshot_bytes:
             logger.warning("Spot check failed: Could not capture snapshot.")
             return False
 
-        passed = self.liveness_svc.verify_challenge(snapshot_bytes, challenge_type)
-        
+        passed = await asyncio.to_thread(self.liveness_svc.verify_challenge, snapshot_bytes, challenge_type)
+
         if passed:
             logger.info("Spot Check PASSED.")
             await self._play_text_with_cache(
@@ -391,12 +384,12 @@ class MeetInterviewOrchestrator:
                 "I couldn't verify that. Please look to your left clearly.", "spot_check_retry", session, state.turn_count
             )
             await asyncio.sleep(2.5)
-            
-            snapshot_bytes_retry = self.session_mgr.capture_snapshot_now(session.session_id)
+
+            snapshot_bytes_retry = await self.session_mgr.capture_snapshot_now(session.session_id)
             passed_retry = False
             if snapshot_bytes_retry:
-                passed_retry = self.liveness_svc.verify_challenge(snapshot_bytes_retry, challenge_type)
-            
+                passed_retry = await asyncio.to_thread(self.liveness_svc.verify_challenge, snapshot_bytes_retry, challenge_type)
+
             if passed_retry:
                 logger.info("Spot Check PASSED (Attempt 2).")
                 await self._play_text_with_cache("Thank you.", "spot_check_success", session, state.turn_count)
@@ -414,7 +407,7 @@ class MeetInterviewOrchestrator:
             self.interview_svc.stream_interview_turn, session.session_id, turn_count
         ))
         
-        await asyncio.to_thread(session.meet.enable_microphone)
+        await session.meet.enable_microphone()
         await asyncio.sleep(InterviewTiming.MIC_TOGGLE_DELAY_SEC)
         
         audio_stream = await gemini_task
@@ -428,10 +421,10 @@ class MeetInterviewOrchestrator:
             self.audio_handler.play_audio_stream, audio_stream, session.meet, session.stop_event
         )
         
-        # FIX: Disable mic after question playback so the VB-Audio cable is
-        # clean before STT recording captures the candidate's response.
-        await asyncio.to_thread(session.meet.disable_microphone)
-        await asyncio.sleep(0.3)  # Let virtual cable drain
+        # FIX: Wait for virtual cable to drain into Google Meet before
+        # disabling the mic so the candidate's response isn't cut off.
+        await asyncio.sleep(1.5)
+        await session.meet.disable_microphone()
         
         return success, turn_count + 1, duration
 
@@ -461,7 +454,7 @@ class MeetInterviewOrchestrator:
             on_interim_transcript=on_interim
         )
         end_time = datetime.now()
-        await asyncio.to_thread(session.meet.disable_microphone)
+        await session.meet.disable_microphone()
         
         audio_path = get_user_audio_path_for_stt(session.session_id, turn_count, is_follow_up)
         return ResponseData(transcript, audio_path, start_time, end_time, turn_count, is_follow_up)
@@ -472,7 +465,15 @@ class MeetInterviewOrchestrator:
         path = self.interview_svc.get_static_audio_path(text, cache_key)
         if not path: return False
 
+        # FIX: Ensure Google Meet microphone is explicitly unmuted before playing the WAV
+        # and muted afterwards, so the candidate can actually hear the bot.
+        await session.meet.enable_microphone()
+        await asyncio.sleep(InterviewTiming.MIC_TOGGLE_DELAY_SEC)
+        
         success = await asyncio.to_thread(self.audio_handler.play_wav_file, path, session.meet, session.stop_event)
+        
+        await asyncio.sleep(1.0)  # Drain virtual cable before disabling mic
+        await session.meet.disable_microphone()
         return success
 
     def _get_interview_session(self, session_id: str) -> InterviewSession:
@@ -504,7 +505,7 @@ class MeetInterviewOrchestrator:
     async def _check_integrity_async(self, session: InterviewSession):
         """Run integrity check in background (low priority) - doesn't block conversation."""
         try:
-            await asyncio.to_thread(self.integrity_handler.check_video_integrity, session)
+            await self.integrity_handler.check_video_integrity(session)
         except Exception as e:
             logger.debug(f"Background integrity check failed: {e}")
 
@@ -525,34 +526,43 @@ class MeetInterviewOrchestrator:
         if not await self._candidate_absent(session):
             return True
 
-        logger.warning(f" Candidate disconnected. Waiting {MAX_WAIT_SECONDS}s")
-        try: session.meet.send_chat_message("Connection lost. I am waiting here for you to rejoin.")
+        logger.warning(f"Session {session.session_id}: Candidate disconnected. Waiting {MAX_WAIT_SECONDS}s for rejoin...")
+        try: await session.meet.send_chat_message("Connection lost. I am waiting here for you to rejoin.")
         except Exception: pass
 
         start_time = time.time()
+        last_log_time = start_time
+        
         while time.time() - start_time < MAX_WAIT_SECONDS:
             self._heartbeat_session(session.session_id)
             if session.stop_event.is_set(): return False
+            
+            # Periodic logging
+            current_time = time.time()
+            if current_time - last_log_time >= 30:
+                elapsed = int(current_time - start_time)
+                logger.info(f"Session {session.session_id}: Still waiting for candidate to rejoin... ({elapsed}s elapsed)")
+                last_log_time = current_time
+                
             try:
                 if await self._candidate_present(session):
                     # Track this reconnection
                     reconnect_count = self.session_mgr.increment_reconnection_count(session.session_id)
-                    logger.info(f"Candidate rejoined! (Reconnection #{reconnect_count})")
+                    logger.info(f"Session {session.session_id}: Candidate rejoined! (Reconnection #{reconnect_count})")
                     
                     await asyncio.sleep(4.0)
-                    await asyncio.to_thread(session.meet.enable_microphone)
-                    await asyncio.sleep(InterviewTiming.MIC_TOGGLE_DELAY_SEC)
                     await self._play_text_with_cache(StaticMessages.RESUME_GREETING, StaticMessages.CACHE_KEY_RESUME, session, 0)
-                    await asyncio.to_thread(session.meet.disable_microphone)
                     return True
             except Exception: pass
             await asyncio.sleep(POLL_INTERVAL)
+            
+        logger.warning(f"Session {session.session_id}: Candidate rejoin timeout reached ({MAX_WAIT_SECONDS}s).")
         return False 
 
     async def _candidate_present(self, session: InterviewSession, checks: int = 2, interval: float = 0.5) -> bool:
         for _ in range(checks):
             try:
-                count = await asyncio.to_thread(session.meet.get_participant_count)
+                count = await session.meet.get_participant_count()
                 if count < ParticipantThresholds.MIN_VALID_COUNT:
                     return False
             except Exception:
@@ -564,7 +574,7 @@ class MeetInterviewOrchestrator:
         misses = 0
         for _ in range(checks):
             try:
-                count = await asyncio.to_thread(session.meet.get_participant_count)
+                count = await session.meet.get_participant_count()
                 if count >= ParticipantThresholds.MIN_VALID_COUNT:
                     return False
                 misses += 1
@@ -575,8 +585,6 @@ class MeetInterviewOrchestrator:
     
     async def _run_conclusion(self, session: InterviewSession, state: InterviewState):
         logger.info("Playing outro message...")
-        await asyncio.to_thread(session.meet.enable_microphone)
-        await asyncio.sleep(InterviewTiming.MIC_TOGGLE_DELAY_SEC)
         await self._play_text_with_cache(StaticMessages.OUTRO_MESSAGE, StaticMessages.CACHE_KEY_OUTRO, session, state.turn_count)
         await asyncio.sleep(2.0)
 

@@ -6,6 +6,7 @@ Extracted from meet_interview_orchestrator.py for better separation of concerns.
 import logging
 import threading
 import time
+import asyncio
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -34,6 +35,17 @@ class MalpracticeHandler:
             return
         self.processing.set()
         
+        # Dispatch to async handler to avoid blocking or 'coroutine never awaited' errors
+        try:
+            asyncio.get_running_loop().create_task(
+                self._async_handle_violation(session, count, violation_type, names)
+            )
+        except RuntimeError:
+            # Fallback if no running loop (shouldn't happen in our FastAPI app)
+            logger.error("No running event loop found for malpractice handler.")
+            self.processing.clear()
+            
+    async def _async_handle_violation(self, session: "InterviewSession", count: int, violation_type: str, names: list):
         try:
             session.stop_event.set()
             
@@ -53,11 +65,11 @@ class MalpracticeHandler:
             # Generate specific warning
             warning_text, should_terminate = self._get_warning_for_type(violation_type)
             
-            self._play_warning(session, warning_text)
+            await self._play_warning(session, warning_text)
 
             if should_terminate:
-                time.sleep(2.0)
-                session.meet.leave_meeting()
+                await asyncio.sleep(2.0)
+                await session.meet.leave_meeting()
             
         except Exception as e:
             logger.error(f"Error handling malpractice: {e}")
@@ -86,11 +98,11 @@ class MalpracticeHandler:
                 True
             )
     
-    def _play_warning(self, session: "InterviewSession", message: str):
+    async def _play_warning(self, session: "InterviewSession", message: str):
         """Play audio warning and send chat message."""
         try:
-            session.meet.enable_microphone()
-            time.sleep(1.0)
+            await session.meet.enable_microphone()
+            await asyncio.sleep(1.0)
             
             cache_key = "warning_malpractice_generic"
             if "multiple devices" in message:
@@ -100,17 +112,17 @@ class MalpracticeHandler:
             
             if audio_path:
                 force_evt = threading.Event()
-                self.audio_handler.play_wav_file(audio_path, session.meet, force_evt)
+                await asyncio.to_thread(self.audio_handler.play_wav_file, audio_path, session.meet, force_evt)
                 
-            self._send_chat_message(session)
+            await self._send_chat_message(session)
                     
         except Exception:
             pass
     
-    def _send_chat_message(self, session: "InterviewSession"):
+    async def _send_chat_message(self, session: "InterviewSession"):
         """Send termination chat message."""
         try:
-            session.meet.send_chat_message(
+            await session.meet.send_chat_message(
                 "INTERVIEW TERMINATED\n\n"
                 "Multiple participants detected in this session.\n"
                 "This is a violation of interview integrity guidelines.\n\n"

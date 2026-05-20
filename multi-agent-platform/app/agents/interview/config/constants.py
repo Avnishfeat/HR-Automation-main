@@ -1,23 +1,26 @@
 # app/config/constants.py
 from typing import Final
 
+import os
+from typing import Final
+
 class AudioConfig:
     # Sample Rates
     SAMPLE_RATE_24K: Final[int] = 24000  # Used for TTS/STT
     SAMPLE_RATE_48K: Final[int] = 48000  # Google Meet standard
     
     # Virtual Audio Device Names
-    PLAYBACK_DEVICE_NAME: Final[str] = "CABLE Input"
-    RECORDING_DEVICE_NAME: Final[str] = "CABLE Output"
+    PLAYBACK_DEVICE_NAME: Final[str] = os.getenv("PLAYBACK_DEVICE_NAME", "BotSpeaker" if os.name != 'nt' else "CABLE Input")
+    RECORDING_DEVICE_NAME: Final[str] = os.getenv("RECORDING_DEVICE_NAME", "BotMic.monitor" if os.name != 'nt' else "CABLE Output")
     
     # Audio Processing
-    MIN_SPEECH_DURATION_SEC: Final[float] = 0.75  # Minimum speech before considering as response
-    VOLUME_THRESHOLD: Final[float] = 0.005         # Minimum volume to detect speech (increased from 0.005 to filter background noise)
+    MIN_SPEECH_DURATION_SEC: Final[float] = 0.6  # Increased to avoid acoustic echo blips triggering it
+    VOLUME_THRESHOLD: Final[float] = 0.002         # Minimum volume to detect speech
     MAX_RECORDING_DURATION_SEC: Final[int] = 120  # Hard timeout for recording
     
-    # Simple fixed silence detection (no adaptive logic)
-    SILENCE_THRESHOLD_SEC: Final[float] = 1.0     # Silence duration to stop recording
-    MIN_RECORDING_SEC: Final[float] = 1.0         # Minimum recording time before silence can trigger
+    # Simple fixed silence detection
+    SILENCE_THRESHOLD_SEC: Final[float] = 1.5     # Increased to allow natural pauses
+    MIN_RECORDING_SEC: Final[float] = 2.0         # Minimum recording time before silence can trigger
 
     # Audio Quality Checks
     MIN_AUDIO_DURATION_SEC: Final[float] = 1.0    # Minimum duration for valid audio
@@ -27,7 +30,7 @@ class InterviewTiming:
     DEFAULT_DURATION_MINUTES: Final[int] = 10
     ESTIMATED_TURN_DURATION_SEC: Final[int] = 90  # For time remaining calculation
  
-    CANDIDATE_JOIN_TIMEOUT_SEC: Final[int] = 300  # 5 minutes
+    CANDIDATE_JOIN_TIMEOUT_SEC: Final[int] = 900  # 15 minutes
     CANDIDATE_REJOIN_TIMEOUT_SEC: Final[int] = 120  # 2 minutes
     
     MAX_INTRO_ATTEMPTS: Final[int] = 2

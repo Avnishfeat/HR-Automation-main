@@ -11,11 +11,11 @@ logger = logging.getLogger(__name__)
 
 # Try multiple PDF parsing libraries for better compatibility
 try:
-    import PyPDF2
+    import pypdf
     PYPDF2_AVAILABLE = True
 except ImportError:
     PYPDF2_AVAILABLE = False
-    logger.warning("PyPDF2 not available")
+    logger.warning("pypdf not available")
 
 try:
     import pdfplumber
@@ -42,7 +42,7 @@ class ResumeParser:
         if not PYPDF2_AVAILABLE and not PDFPLUMBER_AVAILABLE:
             logger.error(
                 "No PDF parsing library available. Install with: "
-                "pip install PyPDF2 pdfplumber"
+                "pip install pypdf pdfplumber"
             )
         
         self.pdf_method_priority = []
@@ -116,14 +116,14 @@ class ResumeParser:
         return "\n\n".join(text_parts)
     
     def _extract_with_pypdf2(self, pdf_bytes: bytes) -> str:
-        """Extract text using PyPDF2 (fallback method)."""
+        """Extract text using pypdf (fallback method)."""
         if not PYPDF2_AVAILABLE:
             return None
         
-        import PyPDF2
+        import pypdf
         
         text_parts = []
-        pdf_reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
+        pdf_reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
         
         for page_num in range(len(pdf_reader.pages)):
             page = pdf_reader.pages[page_num]

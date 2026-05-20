@@ -5,6 +5,7 @@ Extracted from meet_interview_orchestrator.py for better separation of concerns.
 """
 import logging
 import time
+import asyncio
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -23,7 +24,7 @@ class IntegrityHandler:
         self.audio_handler = audio_handler
         self.video_analyzer = video_analyzer
     
-    def check_video_integrity(self, session: "InterviewSession") -> bool:
+    async def check_video_integrity(self, session: "InterviewSession") -> bool:
         """
         Captures a frame and checks for integrity violations (Frozen, Loop, Motion).
         Returns True if a violation was handled, False otherwise.
@@ -34,14 +35,14 @@ class IntegrityHandler:
         - Requires sustained issues (10+ seconds) before first warning
         """
         try:
-            image_data = session.meet.capture_candidate_video()
+            image_data = await session.meet.capture_candidate_video()
             if not image_data:
                 return False
             
             image_bytes = image_data[0]  # (bytes, w, h)
             
             # Analyze frame
-            status = self.video_analyzer.check_frame(image_bytes)
+            status = await asyncio.to_thread(self.video_analyzer.check_frame, image_bytes)
             
             if status == "ok":
                 # Reset sustained violation timer when OK
@@ -91,7 +92,7 @@ class IntegrityHandler:
                 last_warning = session_data.get('last_integrity_warning_time', 0)
                 
                 if current_time - last_warning > 60:
-                    self._handle_violation(session, violation_type)
+                    await self._handle_violation(session, violation_type)
                     session_data['last_integrity_warning_time'] = current_time
                     session_data['motion_warning_count'] += 1
                     session_data['violation_start_time'] = None  # Reset after warning
@@ -112,7 +113,7 @@ class IntegrityHandler:
         }
         return mapping.get(status)
     
-    def _handle_violation(self, session: "InterviewSession", violation_type: str):
+    async def _handle_violation(self, session: "InterviewSession", violation_type: str):
         """Handle a video integrity violation."""
         logger.warning(f"INTEGRITY VIOLATION: {violation_type}")
         
@@ -128,16 +129,16 @@ class IntegrityHandler:
         warning_text = self._get_warning_message(violation_type)
 
         # Play Warning
-        session.meet.enable_microphone()
+        await session.meet.enable_microphone()
         audio_path = self.interview_svc.get_static_audio_path(
             warning_text, 
             f"warn_{violation_type.lower().replace(' ', '_')}"
         )
-        self.audio_handler.play_wav_file(audio_path, session.meet, session.stop_event)
+        await asyncio.to_thread(self.audio_handler.play_wav_file, audio_path, session.meet, session.stop_event)
         
         # Send Chat
         try:
-            session.meet.send_chat_message(f"SYSTEM WARNING: {violation_type} detected.")
+            await session.meet.send_chat_message(f"SYSTEM WARNING: {violation_type} detected.")
         except Exception:
             pass
     

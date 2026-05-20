@@ -1,74 +1,198 @@
 # API Documentation - Multi-Agent Platform
 
-This document provides detailed information about the available APIs in the Multi-Agent Platform.
+This document lists the public API endpoints exposed by the Multi-Agent Platform FastAPI application.
 
-**Base URL:** `http://122.170.2.205:8048`  
-**Swagger Docs:** `http://122.170.2.205:8048/docs`
+## Base URLs
 
----
+Production via nginx:
 
-## 1. Job Description (JD) Agent
-Generates structured job descriptions based on role, requirements, and experience.
+```text
+http://122.170.2.205:7010
+```
 
-### Generate JD (Standard)
-- **URL:** `/api/v1/jd/generate`
-- **Method:** `POST`
-- **Description:** Generates a JD optimized for the Talent Matcher Agent.
-- **Request Body:**
+Interactive API documentation:
+
+```text
+http://122.170.2.205:7010/docs
+```
+
+OpenAPI schema:
+
+```text
+GET /openapi.json
+```
+
+## Root
+
+### API Info
+
+```http
+GET /
+```
+
+Response:
+
+```json
+{
+  "message": "Multi-Agent Platform API",
+  "version": "1.0.0",
+  "docs": "/docs"
+}
+```
+
+## Job Description Agent
+
+Generates structured job descriptions from role, requirements, and optional hiring metadata.
+
+### Generate Job Description
+
+```http
+POST /api/v1/jd/generate
+Content-Type: application/json
+```
+
+Request body:
+
 ```json
 {
   "job_role": "Data Analyst",
-  "requirements": "SQL, Python, Power BI",
+  "requirements": "SQL, Python, Power BI, dashboarding, stakeholder reporting",
+  "preferred_skills": "Statistics, data modeling",
   "experience_range": "3-5 years",
+  "salary_range": "8-12 LPA",
   "work_location": "Mumbai",
-  "job_type": "Full-time"
+  "job_type": "Full-time",
+  "department": "Analytics",
+  "jd_shift": "Day shift",
+  "joining_timeline": "30 days",
+  "travel_requirement": "Occasional",
+  "no_of_positions": "2",
+  "total_budget": "24 LPA",
+  "employee_id": "EMP1001",
+  "employee_name": "Recruiter Name",
+  "employee_email_id": "recruiter@example.com",
+  "reports_to_id": "MGR1001",
+  "reports_to_name": "Hiring Manager",
+  "reports_to_email": "manager@example.com",
+  "job_code": "DA-001",
+  "oprations": "INSERT",
+  "postion_open_date": "2026-05-18",
+  "positionclosedate": "2026-06-18",
+  "jd_validity_period": "30 days"
 }
 ```
-- **Response:**
+
+Required field:
+
+- `requirements`
+
+Response:
+
 ```json
 {
   "status": true,
   "job_role": "Data Analyst",
   "job_description": {
-    "required_skills": "...",
-    "preferred_skills": "...",
-    "minimum_qualification": "...",
-    "languages": "...",
-    "overview": "...",
-    "key_responsibilities": "...",
-    "key_skills_and_qualifications": "...",
-    "desired_attributes": "...",
-    "benefits": "..."
+    "required_skills": "SQL, Python, Power BI",
+    "preferred_skills": "Statistics, data modeling",
+    "minimum_qualification": "Bachelor's degree",
+    "languages": "English",
+    "overview": "Role overview...",
+    "key_responsibilities": "Responsibilities...",
+    "key_skills_and_qualifications": "Skills and qualifications...",
+    "desired_attributes": "Attributes...",
+    "benefits": "Benefits..."
   }
 }
 ```
 
-### Generate JD (Flat)
-- **URL:** `/api/v1/jd/generate-flat`
-- **Method:** `POST`
-- **Description:** Returns a flat structure of the job description.
+### Generate Flat Job Description
 
----
+```http
+POST /api/v1/jd/generate-flat
+Content-Type: application/json
+```
 
-## 2. Talent Matcher Agent
-Matches employees to a given job description.
+Uses the same request body as `/api/v1/jd/generate`, but returns generated JD fields at the response root.
 
-### Match Employees
-- **URL:** `/api/v1/talent_matcher/match-job`
-- **Method:** `POST`
-- **Description:** Matches employee profiles against a structured JD.
-- **Request Body:**
+Response:
+
+```json
+{
+  "status": true,
+  "required_skills": "SQL, Python, Power BI",
+  "preferred_skills": "Statistics, data modeling",
+  "minimum_qualification": "Bachelor's degree",
+  "languages": "English",
+  "overview": "Role overview...",
+  "key_responsibilities": "Responsibilities...",
+  "key_skills_and_qualifications": "Skills and qualifications...",
+  "desired_attributes": "Attributes...",
+  "benefits": "Benefits..."
+}
+```
+
+### JD Health
+
+```http
+GET /api/v1/jd/health
+```
+
+Response:
+
+```json
+{
+  "status": "ok",
+  "agent": "JD Agent"
+}
+```
+
+## Talent Matcher Agent
+
+Matches employee profiles against a structured job description.
+
+### Match Employees to Job
+
+```http
+POST /api/v1/talent_matcher/match-job
+Content-Type: application/json
+```
+
+Request body:
+
 ```json
 {
   "job_role": "Data Analyst",
   "job_description": {
     "required_skills": "SQL, Python, Power BI",
-    "minimum_qualification": "Bachelor's Degree",
-    "min_years_experience": 3
-  }
+    "preferred_skills": "Statistics",
+    "minimum_qualification": "Bachelor's degree",
+    "languages": "English",
+    "overview": "Analyze business data and build dashboards.",
+    "key_responsibilities": "Create reports, dashboards, and insights.",
+    "key_skills_and_qualifications": "SQL, Python, BI tools",
+    "desired_attributes": "Analytical thinking",
+    "benefits": "Standard benefits",
+    "min_years_experience": 3,
+    "required_degree": "Bachelor's degree"
+  },
+  "required_degree": "Bachelor's degree",
+  "min_years_experience": 3
 }
 ```
-- **Response:**
+
+Required fields:
+
+- `job_role`
+- `job_description`
+
+Optional override fields:
+
+- `required_degree`
+- `min_years_experience`
+
+Response:
+
 ```json
 {
   "status": true,
@@ -79,165 +203,397 @@ Matches employees to a given job description.
       "title": "Data Scientist",
       "score": 0.85,
       "experience_years": 4,
-      "reasons": ["Strong SQL skills", "Experienced in Python"]
+      "reasons": [
+        "Strong SQL skills",
+        "Experienced in Python"
+      ]
     }
   ],
   "message": "Found 1 matching candidates for Data Analyst"
 }
 ```
 
----
+### Talent Matcher Health
 
-## 3. Candidate Criteria Agent
-Extracts search criteria for various platforms from a JD.
+```http
+GET /api/v1/talent_matcher/health
+```
 
-### Generate Criteria
-- **URL:** `/api/v1/criteria/generate`
-- **Method:** `POST`
-- **Request Body:**
+Response:
+
 ```json
 {
-  "jd_text": "We are hiring a Senior Data Analyst in Mumbai...",
-  "target": "all" 
+  "status": "ok",
+  "agent": "Talent Matcher"
 }
 ```
-- **Targets:** `linkedin`, `indeed`, `naukri`, `all`
-- **Response:**
+
+## Candidate Criteria Agent
+
+Extracts platform-specific candidate search criteria from a job description.
+
+### Generate Candidate Criteria
+
+```http
+POST /api/v1/criteria/generate
+Content-Type: application/json
+```
+
+Request body:
+
+```json
+{
+  "jd_text": "We are hiring a Senior Data Analyst in Mumbai. The ideal candidate has 5+ years of experience with SQL, Python, and Power BI. Responsibilities include creating dashboards and performing statistical analysis.",
+  "target": "all"
+}
+```
+
+Required fields:
+
+- `jd_text`: minimum 50 characters
+- `target`: one of `linkedin`, `indeed`, `naukri`, `all`
+
+Response:
+
 ```json
 {
   "status": true,
   "criteria": {
-    "linkedin": { ... },
-    "indeed": { ... },
-    "naukri": { ... }
+    "linkedin": {},
+    "indeed": {},
+    "naukri": {}
   }
 }
 ```
 
----
+### Criteria Health
 
-## 4. Job Post Agent
-Creates platform-specific job posts from a JD.
+```http
+GET /api/v1/criteria/health
+```
 
-### Generate Job Post
-- **URL:** `/api/v1/job-post-agent/generate`
-- **Method:** `POST`
-- **Request Body:**
+Response:
+
 ```json
 {
-  "job_description": "We are seeking a Senior Python Developer...",
+  "status": "ok",
+  "agent": "Criteria Agent"
+}
+```
+
+## Job Post Agent
+
+Creates platform-specific job posts from a job description.
+
+### Generate Job Post
+
+```http
+POST /api/v1/job-post-agent/generate
+Content-Type: application/json
+```
+
+Request body:
+
+```json
+{
+  "job_description": "We are seeking a Senior Python Developer with strong FastAPI experience, REST API development skills, database knowledge, and experience building production backend services.",
   "platform": "LinkedIn"
 }
 ```
-- **Platforms:** `LinkedIn`, `Indeed`, `Naukri`
-- **Response:**
+
+Required fields:
+
+- `job_description`: minimum 50 characters
+- `platform`: one of `LinkedIn`, `Indeed`, `Naukri`
+
+Response:
+
 ```json
 {
   "status": true,
   "platform": "LinkedIn",
-  "generated_post": "..."
+  "generated_post": "Generated job post text..."
 }
 ```
 
----
+## Resume Matcher Agent
 
-## 5. Resume Matcher Agent
-Compares a resume (file) against a job description.
+Compares a resume file against a job description.
 
-### Match Resume to JD
-- **URL:** `/api/v1/resume_matcher/match`
-- **Method:** `POST`
-- **Content-Type:** `multipart/form-data`
-- **Form Fields:**
-  - `job_description`: (String) The JD text or JSON
-  - `resume`: (File) The resume (PDF, DOCX, TXT)
-- **Response:**
+### Match Resume to Job Description
+
+```http
+POST /api/v1/resume_matcher/match
+Content-Type: multipart/form-data
+```
+
+Form fields:
+
+- `job_description`: full job description text or JSON string
+- `resume`: resume file; supported extensions are `.pdf`, `.docx`, and `.txt`
+
+Example:
+
+```bash
+curl -X POST "http://122.170.2.205:7010/api/v1/resume_matcher/match" \
+  -F "job_description=We need a Python developer with FastAPI experience." \
+  -F "resume=@/path/to/resume.pdf"
+```
+
+Response:
+
 ```json
 {
   "candidate_name": "John Doe",
   "email": "john.doe@example.com",
+  "contact": "+91-9999999999",
+  "socials": [
+    "https://www.linkedin.com/in/johndoe"
+  ],
   "confidence_score": 0.92,
-  "skills": ["Python", "FastAPI"],
+  "skills": [
+    "Python",
+    "FastAPI"
+  ],
+  "experience": "4 years of backend development experience",
   "mismatch_reasons": []
 }
 ```
 
----
+## Question Generator Agent
 
-## 6. Question Generator Agent
-Generates an interview questionnaire based on JD and Resume.
+Generates interview questions from a job description, requirements, and a PDF resume.
 
 ### Generate Questionnaire
-- **URL:** `/api/v1/question_generator/generate`
-- **Method:** `POST`
-- **Content-Type:** `multipart/form-data`
-- **Form Fields:**
-  - `jd_text`: (String) Job description text
-  - `requirements`: (List[String]) Specific requirements
-  - `resume_file`: (File) Candidate's resume (PDF)
-- **Response:**
+
+```http
+POST /api/v1/question_generator/generate
+Content-Type: multipart/form-data
+```
+
+Form fields:
+
+- `jd_text`: full job description text
+- `requirements`: one or more requirement values
+- `resume_file`: candidate resume PDF file; content type must be `application/pdf`
+
+Example:
+
+```bash
+curl -X POST "http://122.170.2.205:7010/api/v1/question_generator/generate" \
+  -F "jd_text=We need a Python developer with FastAPI and SQL experience." \
+  -F "requirements=Python" \
+  -F "requirements=FastAPI" \
+  -F "requirements=SQL" \
+  -F "resume_file=@/path/to/resume.pdf;type=application/pdf"
+```
+
+Response:
+
 ```json
 {
   "status": true,
   "questions": [
-    "Can you explain your experience with SQL?",
-    "How have you used Python for data analysis?"
+    "Can you explain your experience building APIs with FastAPI?",
+    "How have you optimized SQL queries in previous projects?"
   ]
 }
 ```
 
----
+## Interview Agent
 
-## 7. Interview Agent
-Orchestrates automated interviews via Google Meet.
+Starts and manages automated Google Meet interview sessions.
 
 ### Start Google Meet Interview
-- **URL:** `/api/v1/interview/start-google-meet`
-- **Method:** `POST`
-- **Content-Type:** `multipart/form-data`
-- **Form Fields:**
-  - `candidate_id`: "CAND123"
-  - `meet_link`: "https://meet.google.com/..."
-  - `job_role`: "Data Analyst"
-  - `resume`: (File)
-  - `questionnaire_json`: (Optional JSON list of questions)
-- **Response:**
+
+```http
+POST /api/v1/interview/start-google-meet
+Content-Type: multipart/form-data
+```
+
+Form fields:
+
+- `meet_link`: Google Meet URL
+- `job_role`: job role being interviewed for
+- `resume`: candidate resume file; supported extensions are `.pdf`, `.docx`, and `.txt`
+- `questionnaire_json`: optional JSON array of question strings
+- `audio_device`: optional audio device index
+- `enable_video`: optional boolean, defaults to `true`
+- `job_description`: optional job description text
+- `video_capture_method`: optional value, defaults to `javascript`
+- `webhook_url`: optional callback URL for interview results/events
+
+Example:
+
+```bash
+curl -X POST "http://122.170.2.205:7010/api/v1/interview/start-google-meet" \
+  -F "meet_link=https://meet.google.com/abc-defg-hij" \
+  -F "job_role=Data Analyst" \
+  -F "job_description=Analyze business data and build dashboards." \
+  -F 'questionnaire_json=["Tell me about your SQL experience.","How do you validate dashboard accuracy?"]' \
+  -F "enable_video=true" \
+  -F "video_capture_method=javascript" \
+  -F "resume=@/path/to/resume.pdf"
+```
+
+Success response uses HTTP `202 Accepted`:
+
 ```json
 {
   "status": "pending",
-  "session_id": "sess_20260511_123456"
+  "session_id": "8f2b7b5f-3f1f-49d7-8895-6a98ad3c0a55"
 }
 ```
 
+Possible errors:
+
+- `503`: server interview capacity reached
+- `400`: invalid resume or invalid questionnaire JSON
+- `500`: interview task scheduling failed
+
 ### Get Interview Status
-- **URL:** `/api/v1/interview/{session_id}/status`
-- **Method:** `GET`
+
+```http
+GET /api/v1/interview/{session_id}/status
+```
+
+Response examples:
+
+```json
+{
+  "status": "completed",
+  "session_id": "8f2b7b5f-3f1f-49d7-8895-6a98ad3c0a55"
+}
+```
+
+```json
+{
+  "status": "active",
+  "session_id": "8f2b7b5f-3f1f-49d7-8895-6a98ad3c0a55"
+}
+```
+
+```json
+{
+  "status": "active_or_not_found",
+  "session_id": "8f2b7b5f-3f1f-49d7-8895-6a98ad3c0a55"
+}
+```
 
 ### End Interview
-- **URL:** `/api/v1/interview/{session_id}/end`
-- **Method:** `POST`
 
----
+```http
+POST /api/v1/interview/{session_id}/end
+```
 
-## 8. Example Agent
-Template agent for testing purposes.
+Response:
 
-### Query
-- **URL:** `/api/v1/example/example-agent/query`
-- **Method:** `POST`
-- **Request Body:**
+```json
+{
+  "status": "ending",
+  "session_id": "8f2b7b5f-3f1f-49d7-8895-6a98ad3c0a55"
+}
+```
+
+## Example Agent
+
+Template endpoint for testing LLM and database service wiring.
+
+### Query Example Agent
+
+```http
+POST /api/v1/example/example-agent/query
+Content-Type: application/json
+```
+
+Request body:
+
 ```json
 {
   "query": "Hello",
+  "context": "Optional extra context",
   "use_provider": "gemini"
 }
 ```
 
----
+Response:
 
-## Health Checks
-All agents have a `/health` endpoint:
-- `GET /api/v1/jd/health`
-- `GET /api/v1/criteria/health`
-- `GET /api/v1/talent_matcher/health`
-- `GET /api/v1/example/example-agent/health`
+```json
+{
+  "agent_name": "example_agent",
+  "result": "Generated response...",
+  "provider_used": "gemini"
+}
+```
+
+### Example Agent Health
+
+```http
+GET /api/v1/example/example-agent/health
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "status": "healthy"
+  },
+  "message": "Success"
+}
+```
+
+## WebSocket
+
+### Echo WebSocket
+
+```text
+ws://122.170.2.205:7010/ws/{client_id}
+```
+
+The current implementation accepts text messages and sends back:
+
+```text
+Echo: <message>
+```
+
+## Error Format
+
+Most endpoints return FastAPI validation errors for invalid input:
+
+```json
+{
+  "detail": [
+    {
+      "type": "missing",
+      "loc": [
+        "body",
+        "field_name"
+      ],
+      "msg": "Field required",
+      "input": {}
+    }
+  ]
+}
+```
+
+Several agent endpoints wrap application errors as:
+
+```json
+{
+  "status": false,
+  "detail": "Error message"
+}
+```
+
+or:
+
+```json
+{
+  "detail": {
+    "status": false,
+    "error": "Error message"
+  }
+}
+```

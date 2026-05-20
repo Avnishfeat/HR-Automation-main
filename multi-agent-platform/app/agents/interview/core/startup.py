@@ -11,7 +11,7 @@ from app.agents.interview.services.audio.audio_handler import AudioHandler
 from app.agents.interview.services.interview_service import InterviewService
 from app.agents.interview.services.analysis.transcript_analyzer import TranscriptAnalyzer
 from app.agents.interview.services.analysis.combined_analyzer import CombinedAnalyzer
-from app.agents.interview.infrastructure.selenium.meet_session_manager import MeetSessionManager
+from app.agents.interview.infrastructure.browser.meet_session_manager import MeetSessionManager
 from app.agents.interview.orchestrator.meet_interview_orchestrator import MeetInterviewOrchestrator
 from app.agents.interview.services.audio.stt_service import STTService
 from app.agents.interview.services.audio.tts_service import TTSService
@@ -22,6 +22,36 @@ from app.agents.interview.core.limiter import limiter, init_concurrency_limiter
 from app.agents.interview.core.cleanup import start_cleanup_task, stop_cleanup_task
 
 logger = logging.getLogger(__name__)
+
+def setup_linux_audio():
+    """Configures virtual audio sinks on Linux (PulseAudio/PipeWire)"""
+    import sys
+    import subprocess
+    import os
+    if not sys.platform.startswith('linux'):
+        return
+
+    try:
+        # Check if sinks already exist
+        sinks = subprocess.check_output(['pactl', 'list', 'sinks', 'short'], text=True)
+        
+        if 'BotSpeaker' not in sinks:
+            logger.info("Creating virtual sink: BotSpeaker")
+            subprocess.run(['pactl', 'load-module', 'module-null-sink', 'sink_name=BotSpeaker', 'sink_properties=device.description=BotSpeaker'], check=True)
+        
+        if 'BotMic' not in sinks:
+            logger.info("Creating virtual sink: BotMic")
+            subprocess.run(['pactl', 'load-module', 'module-null-sink', 'sink_name=BotMic', 'sink_properties=device.description=BotMic'], check=True)
+            
+        # Set environment variables for the current process (Bot)
+        # This tells sounddevice (via PortAudio pulse backend) which sink/source to use as 'default'
+        os.environ["PULSE_SINK"] = "BotSpeaker"
+        os.environ["PULSE_SOURCE"] = "BotMic.monitor"
+        
+        logger.info(" [Linux Audio] Virtual sinks configured and environment routed")
+    except Exception as e:
+        logger.warning(f" [Linux Audio] Failed to auto-configure virtual sinks: {e}. Ensure pulseaudio-utils is installed.")
+
 
 class ServiceContainer:
     """Container for all application services"""
@@ -38,6 +68,9 @@ services = ServiceContainer()
 
 def initialize_services():
     try:
+        # 0. Linux Audio Setup
+        setup_linux_audio()
+
         # FIX 1: Increase urllib3 connection pool size BEFORE initializing services
         urllib3.PoolManager(num_pools=50, maxsize=100)
         logger.info(" urllib3 connection pool configured (maxsize=100)")

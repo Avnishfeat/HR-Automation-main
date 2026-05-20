@@ -58,14 +58,16 @@ class GeminiService:
                 if not chunk.text: continue
                 buf += chunk.text
                 while True:
-                    m = re.search(r'([^.!?]+[.!?])(\s+|$)', buf)
+                    m = re.match(r'(.*?[.!?]+)(?:\s+|$)', buf, flags=re.DOTALL)
                     if m:
                         s = m.group(1).strip()
                         if s: yield s
-                        buf = buf[len(m.group(0)):].lstrip()
+                        buf = buf[m.end():].lstrip()
                     else: break
             if buf.strip(): yield buf.strip()
-        except Exception: yield "I didn't catch that."
+        except Exception as e:
+            logger.error(f"Error in stream_gemini_sentences: {e}")
+            yield "I didn't catch that."
 
     def end_session(self, session_id: str):
         self.active_chat_sessions.pop(session_id, None)
@@ -77,7 +79,8 @@ class GeminiService:
             f"Resume: {resume_text[:2000]}. Questionnaire: {questionnaire}. JD: {job_description}. "
             f"The candidate has just been asked to introduce themselves. "
             f"Acknowledge their response naturally, then ask the first question from the questionnaire. "
-            f"Respond in raw text, short sentences, conversational tone. Do NOT state that you are evaluating their resume."
+            f"Respond in raw text, short sentences, conversational tone. Do NOT state that you are evaluating their resume. "
+            f"If the candidate asks you to repeat a question, do NOT just repeat your previous response word-for-word. Instead, acknowledge the request naturally (e.g., 'Sure, I can repeat that') and rephrase the question slightly so it sounds more conversational and natural."
         )
 
     @classmethod

@@ -34,6 +34,7 @@ async def start_google_meet_interview(
     job_description: Optional[str] = Form(None),
     video_capture_method: str = Form("javascript"),
     webhook_url: Optional[str] = Form(None),
+    candidate_email: Optional[str] = Form(None),
     resume: UploadFile = File(...)
 ):
     """
@@ -117,7 +118,8 @@ async def start_google_meet_interview(
             enable_video=enable_video,
             video_capture_method=video_capture_method,
             job_role=job_role,
-            resume_content=resume_content
+            resume_content=resume_content,
+            candidate_email=candidate_email
         )
         
     except Exception as e:
@@ -130,7 +132,7 @@ async def start_google_meet_interview(
     return {"status": "pending", "session_id": session_id}
 
 @router.get("/{session_id}/status")
-async def get_interview_status(session_id: str):
+def get_interview_status(session_id: str):
     """
     Check if a session is still active or completed.
     Stateless check: presence of report on disk.

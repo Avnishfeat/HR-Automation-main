@@ -9,15 +9,38 @@ import sounddevice as sd
 import numpy as np
 import queue
 import threading
-import audioop
 import soundfile as sf
+import time
 from pathlib import Path
 from typing import Union, Optional, Callable, Iterator
 
-from app.agents.interview.infrastructure.selenium.meet_controller import MeetController
+from app.agents.interview.infrastructure.browser.meet_controller import MeetController
 from app.agents.interview.config.constants import AudioConfig
 
 logger = logging.getLogger(__name__)
+
+# Standard G.711 mu-law to 16-bit linear PCM lookup table
+ULAW_TO_LIN16_TABLE = np.array([
+    -32124, -31100, -30076, -29052, -28028, -27004, -25980, -24956, -23932, -22908,
+    -21884, -20860, -19836, -18812, -17788, -16764, -15996, -15484, -14972, -14460,
+    -13948, -13436, -12924, -12412, -11900, -11388, -10876, -10364, -9852, -9340, -8828,
+    -8316, -7932, -7676, -7420, -7164, -6908, -6652, -6396, -6140, -5884, -5628, -5372,
+    -5116, -4860, -4604, -4348, -4092, -3900, -3772, -3644, -3516, -3388, -3260, -3132,
+    -3004, -2876, -2748, -2620, -2492, -2364, -2236, -2108, -1980, -1884, -1820, -1756,
+    -1692, -1628, -1564, -1500, -1436, -1372, -1308, -1244, -1180, -1116, -1052, -988,
+    -924, -876, -844, -812, -780, -748, -716, -684, -652, -620, -588, -556, -524, -492,
+    -460, -428, -396, -372, -356, -340, -324, -308, -292, -276, -260, -244, -228, -212,
+    -196, -180, -164, -148, -132, -120, -112, -104, -96, -88, -80, -72, -64, -56, -48,
+    -40, -32, -24, -16, -8, 0, 32124, 31100, 30076, 29052, 28028, 27004, 25980, 24956,
+    23932, 22908, 21884, 20860, 19836, 18812, 17788, 16764, 15996, 15484, 14972, 14460,
+    13948, 13436, 12924, 12412, 11900, 11388, 10876, 10364, 9852, 9340, 8828, 8316, 7932,
+    7676, 7420, 7164, 6908, 6652, 6396, 6140, 5884, 5628, 5372, 5116, 4860, 4604, 4348,
+    4092, 3900, 3772, 3644, 3516, 3388, 3260, 3132, 3004, 2876, 2748, 2620, 2492, 2364,
+    2236, 2108, 1980, 1884, 1820, 1756, 1692, 1628, 1564, 1500, 1436, 1372, 1308, 1244,
+    1180, 1116, 1052, 988, 924, 876, 844, 812, 780, 748, 716, 684, 652, 620, 588, 556,
+    524, 492, 460, 428, 396, 372, 356, 340, 324, 308, 292, 276, 260, 244, 228, 212, 196,
+    180, 164, 148, 132, 120, 112, 104, 96, 88, 80, 72, 64, 56, 48, 40, 32, 24, 16, 8, 0
+], dtype=np.int16)
 
 
 class AudioHandler:
@@ -28,6 +51,7 @@ class AudioHandler:
     def _find_playback_device(self) -> Optional[int]:
         """Discovers and configures the virtual audio output device."""
         try:
+            import os
             target_name = AudioConfig.PLAYBACK_DEVICE_NAME.lower()
             devices = sd.query_devices()
             preferred_hostapis = ['Windows WASAPI', 'Windows DirectSound', 'MME']
@@ -48,6 +72,15 @@ class AudioHandler:
                     logger.info(f"[AudioHandler] Found fallback VB-Audio Playback: {d['index']}")
                     self.target_samplerate = int(d['default_samplerate'])
                     return d['index']
+                    
+            if os.name != 'nt':
+                # Fallback to the explicit PulseAudio device on Linux
+                # since we set PULSE_SINK in the environment
+                for d in devices:
+                    if d['name'] == 'pulse' and d['max_output_channels'] > 0:
+                        logger.info("Falling back to PulseAudio device for TTS playback")
+                        self.target_samplerate = int(d['default_samplerate']) or 48000
+                        return d['index']
             
             logger.warning("[AudioHandler] VB-Audio Playback device not found. Using system default.")
             return None
@@ -73,23 +106,17 @@ class AudioHandler:
         
         def feeder_func(audio_queue: queue.Queue, finished: threading.Event):
             """Feeds decoded audio chunks into queue."""
-            state = None
             try:
                 for chunk_bytes in audio_chunk_iterator:
                     if stop_event.is_set() or finished.is_set():
                         break
                     
-                    # Decode MULAW to Linear PCM
-                    linear_audio = audioop.ulaw2lin(chunk_bytes, 2)
-
-                    # Resample via audioop to the target hardware frequency
-                    if self.target_samplerate != 24000:
-                        linear_audio, state = audioop.ratecv(linear_audio, 2, 1, 24000, self.target_samplerate, state)
+                    # Decode MULAW to Linear PCM (Google TTS native 24kHz) via numpy lookup
+                    chunk_uint8 = np.frombuffer(chunk_bytes, dtype=np.uint8)
+                    linear_audio_int16 = ULAW_TO_LIN16_TABLE[chunk_uint8]
                     
                     # Convert to float32 for sounddevice
-                    audio_data = np.frombuffer(
-                        linear_audio, dtype=np.int16
-                    ).astype(np.float32) / 32768.0
+                    audio_data = linear_audio_int16.astype(np.float32) / 32768.0
                     
                     if len(audio_data) > 0:
                         audio_queue.put(audio_data)
@@ -98,7 +125,9 @@ class AudioHandler:
             finally:
                 audio_queue.put(None)
                 
-        return self._execute_playback(feeder_func, meet, stop_event, samplerate=self.target_samplerate)
+        # Use native 24kHz and let PipeWire/OS handle the resampling, preventing crackles
+        # Increase prebuffer to 20 to handle tiny network chunks from Google TTS
+        return self._execute_playback(feeder_func, stop_event, samplerate=24000, prebuffer_chunks=20)
 
     def play_wav_file(
         self,
@@ -109,14 +138,6 @@ class AudioHandler:
         """
         Play a local WAV file directly.
         Optimized for cached static audio.
-        
-        Args:
-            file_path: Path to WAV file
-            meet: Meet controller for participant monitoring
-            stop_event: Event to signal early termination
-            
-        Returns:
-            True if playback completed successfully, False if interrupted
         """
         if not Path(file_path).exists():
             logger.error(f"Audio file not found: {file_path}")
@@ -124,105 +145,82 @@ class AudioHandler:
         
         logger.info(f"Playing cached audio: {Path(file_path).name}")
         
-        # Read file using soundfile at the top-level to get real sampling rate
+        # Read file using soundfile
         try:
-            _, fs = sf.read(str(file_path), frames=64, dtype='float32')
-        except Exception:
-            fs = self.target_samplerate
+            data, fs = sf.read(str(file_path), dtype='float32')
+        except Exception as e:
+            logger.error(f"Failed to read audio file: {e}")
+            return False
+
+        # Ensure mono
+        if len(data.shape) > 1:
+            data = data.mean(axis=1)
 
         def feeder_func(audio_queue: queue.Queue, finished: threading.Event):
             """Feeds audio file chunks into queue."""
             try:
-                # Read entire file using soundfile
-                data, _ = sf.read(str(file_path), dtype='float32')
-                
-                # Ensure mono
-                if len(data.shape) > 1:
-                    data = data.mean(axis=1)
-
-                import scipy.signal
-                if fs != self.target_samplerate:
-                    num_samples = int(len(data) * float(self.target_samplerate) / fs)
-                    if num_samples > 0:
-                        data = scipy.signal.resample(data, num_samples).astype(np.float32)
-                
-                #  Feed in smaller chunks for faster interruption response
-                # Smaller chunks = more frequent stop_event checks
-                chunk_size = 2048  # Reduced from 4096 for faster response
+                chunk_size = 4096  # Larger chunk to prevent queue starvation
                 
                 for i in range(0, len(data), chunk_size):
-                    #  Check stop event BEFORE each chunk
                     if stop_event.is_set() or finished.is_set():
-                        logger.debug(f"File feeder stopped at chunk {i//chunk_size}")
                         break
-                    
                     chunk = data[i:i + chunk_size]
                     audio_queue.put(chunk)
-                    
             except Exception as e:
                 logger.error(f"File playback feeder error: {e}", exc_info=True)
             finally:
                 audio_queue.put(None)  # Signal end
         
-        return self._execute_playback(feeder_func, meet, stop_event, samplerate=self.target_samplerate)
+        return self._execute_playback(feeder_func, stop_event, samplerate=fs, prebuffer_chunks=2)
 
     # =========================================================================
     # CORE PLAYBACK ENGINE (Unified Logic)
     # =========================================================================
 
-    def _execute_playback(self, feeder_func: Callable[[queue.Queue, threading.Event], None], meet: MeetController, stop_event: threading.Event, samplerate: Optional[int] = None) -> bool:
-        audio_queue: queue.Queue = queue.Queue(maxsize=100)
+    def _execute_playback(self, feeder_func: Callable[[queue.Queue, threading.Event], None], stop_event: threading.Event, samplerate: Optional[int] = None, prebuffer_chunks: int = 5) -> bool:
+        audio_queue: queue.Queue = queue.Queue(maxsize=200)
         stream_finished = threading.Event()
         internal_buffer = np.array([], dtype=np.float32)
         
-        #  Track if we were interrupted for better logging
         interrupted = threading.Event()
         
         def playback_callback(outdata: np.ndarray, frames: int, time_info, status):
             nonlocal internal_buffer
             
             if status:
-                logger.warning(f"Playback status: {status}")
+                # Only log critical status errors, not every underflow to avoid spam
+                if status.output_underflow:
+                    pass # Normal if queue is starved, don't spam log
+                else:
+                    logger.warning(f"Playback status: {status}")
             
-            #  Check stop event in callback for immediate response
             if stop_event.is_set():
                 interrupted.set()
-                # Fill with silence and stop
-                outdata[:] = 0
+                outdata.fill(0)
                 raise sd.CallbackStop
             
-            # Try to fill buffer from queue
             while len(internal_buffer) < frames:
                 try:
                     chunk = audio_queue.get_nowait()
-                    
                     if chunk is None:
-                        # End of stream
-                        self._write_remaining_buffer(
-                            outdata, internal_buffer, frames
-                        )
+                        self._write_remaining_buffer(outdata, internal_buffer, frames)
                         internal_buffer = np.array([], dtype=np.float32)
                         raise sd.CallbackStop
-                    
                     internal_buffer = np.concatenate([internal_buffer, chunk])
-                    
                 except queue.Empty:
-                    # No more data available - write what we have
+                    # FIX: We must zero-pad the rest of outdata so the OS doesn't
+                    # replay garbage from its circular buffer if we underflow!
                     self._write_remaining_buffer(outdata, internal_buffer, frames)
                     internal_buffer = np.array([], dtype=np.float32)
                     return
             
-            # Write full frame
             outdata[:] = internal_buffer[:frames].reshape(-1, 1)
             internal_buffer = internal_buffer[frames:]
         
         try:
-            #  Check stop event BEFORE starting (early exit)
             if stop_event.is_set():
-                logger.debug("Stop event already set before playback start")
                 return False
             
-            # Start feeder thread
             feeder_thread = threading.Thread(
                 target=feeder_func,
                 args=(audio_queue, stream_finished),
@@ -231,31 +229,32 @@ class AudioHandler:
             )
             feeder_thread.start()
             
-            # Determine output device
+            # --- Pre-buffering wait to avoid instant underflow ---
+            wait_time = 0.0
+            while audio_queue.qsize() < prebuffer_chunks and wait_time < 3.0:
+                if stop_event.is_set(): return False
+                time.sleep(0.05)
+                wait_time += 0.05
+            
             output_device = self.virtual_output or sd.default.device[1]
             
-            # Create output stream
             stream = sd.OutputStream(
                 samplerate=samplerate or self.target_samplerate,
                 device=output_device,
                 channels=1,
                 dtype='float32',
+                blocksize=2048,
+                latency='high',
                 callback=playback_callback,
                 finished_callback=stream_finished.set
             )
             
-            # Run playback loop
             with stream:
                 success = self._monitor_playback(
-                    stream, stream_finished, stop_event, meet, interrupted
+                    stream, stream_finished, stop_event, interrupted
                 )
             
-            # Wait for feeder thread
             feeder_thread.join(timeout=2)
-            
-            if not success and interrupted.is_set():
-                logger.debug("Playback interrupted by stop event")
-            
             return success
             
         except Exception as e:
@@ -267,7 +266,6 @@ class AudioHandler:
         stream: sd.OutputStream,
         stream_finished: threading.Event,
         stop_event: threading.Event,
-        meet: Optional[MeetController],
         interrupted: threading.Event
     ) -> bool:
         #  Check VERY frequently (50ms) for near-instant interruption
@@ -296,18 +294,6 @@ class AudioHandler:
                     logger.debug(f"Stream abort error (may be already stopped): {e}")
                 
                 return False
-            
-            #  Check if candidate disconnected (secondary check)
-            if meet and not self._is_candidate_present(meet):
-                logger.error(" Candidate left during playback")
-                interrupted.set()
-                
-                try:
-                    stream.abort()
-                except Exception as e:
-                    logger.debug(f"Stream abort error: {e}")
-                
-                return False
         
         # Normal completion
         return True
@@ -330,14 +316,6 @@ class AudioHandler:
         
         if buffer_len < frames:
             outdata[buffer_len:] = 0
-
-    @staticmethod
-    def _is_candidate_present(meet: MeetController) -> bool:
-        try:
-            return meet.get_participant_count() >= 2
-        except Exception as e:
-            logger.debug(f"Participant check error: {e}")
-            return True  # Assume present on error to avoid false positives
     
     # =========================================================================
     # EMERGENCY STOP (Optional - for external use)

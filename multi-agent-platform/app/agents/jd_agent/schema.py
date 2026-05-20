@@ -2,7 +2,7 @@
 
 from typing import Optional, List
 # Import field_validator for the modern Pydantic V2 approach
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 class JDInput(BaseModel):
     """Pydantic model for Job Description generation input."""
@@ -74,12 +74,13 @@ class JDInput(BaseModel):
         Key Responsibilities: {self.key_responsibilities if hasattr(self, 'key_responsibilities') else 'Not specified'}
         """
 
-    class Config:
-        str_strip_whitespace = True 
-        json_schema_extra = {
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        json_schema_extra={
             "example": {
                 "job_role": "Data Analyst",
                 "experience_range": "5+ years of experience in data analysis",
                 "requirements": "Proficiency in SQL, experience with Power BI, and knowledge of Python for data manipulation.",
             }
         }
+    )
