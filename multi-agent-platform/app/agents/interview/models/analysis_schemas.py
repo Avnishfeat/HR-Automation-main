@@ -124,6 +124,7 @@ class CombinedAnalysisReport(BaseModel):
     session_id: str
     interview_date: Optional[str]
     candidate_email: Optional[str] = Field(None, description="Email of the candidate")
+    buss_id: Optional[str] = Field(None, description="Business ID of the candidate")
 
     # Scores
     behavioral_score: Optional[float] = Field(None, ge=0, le=10, description="Overall score from behavioral analysis (e.g., based on metrics)")

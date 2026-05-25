@@ -91,12 +91,6 @@ class SecretsManager:
             pattern=r"^AIza[A-Za-z0-9_-]{20,}$"  # Gemini API key: starts with AIza, 20+ additional chars
         ),
         SecretDefinition(
-            name="MONGODB_URL",
-            required=True,
-            description="MongoDB connection string",
-            pattern=r"^mongodb(\+srv)?://"
-        ),
-        SecretDefinition(
             name="GOOGLE_APPLICATION_CREDENTIALS",
             required=False,
             description="Path to Google Cloud service account JSON"

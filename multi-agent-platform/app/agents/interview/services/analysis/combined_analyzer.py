@@ -37,7 +37,8 @@ class CombinedAnalyzer(BaseAnalyzer, FileUploadMixin):
         ended_early: bool,
         background_person_count: int = 0,
         reconnection_count: int = 0,
-        candidate_email: Optional[str] = None
+        candidate_email: Optional[str] = None,
+        buss_id: str = "Not provided"
     ) -> Optional[Dict[str, Any]]:
         try:
             logger.info(f"Starting final combined analysis for {session_id}")
@@ -49,6 +50,7 @@ class CombinedAnalyzer(BaseAnalyzer, FileUploadMixin):
                 session_id=session_id,
                 candidate_name=candidate_name,
                 candidate_email=candidate_email or "Not provided",
+                buss_id=buss_id,
                 duration_sec=duration_sec,
                 ended_early=ended_early,
                 reconnections=reconnection_count,

@@ -13,8 +13,6 @@ class Config:
 
     ENV: str = settings.ENVIRONMENT
     DEBUG: bool = settings.DEBUG
-    MONGODB_URL: str = settings.MONGODB_URL
-    DATABASE_NAME: str = settings.DATABASE_NAME
     GOOGLE_CLOUD_PROJECT: Optional[str] = settings.GOOGLE_CLOUD_PROJECT
     GOOGLE_CLOUD_LOCATION: str = settings.GOOGLE_CLOUD_LOCATION
     GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = settings.GOOGLE_APPLICATION_CREDENTIALS
@@ -33,10 +31,6 @@ class Config:
     @classmethod
     def get_gemini_api_key(cls) -> Optional[str]:
         return secrets.get("GEMINI_API_KEY")
-
-    @classmethod
-    def get_mongodb_url(cls) -> Optional[str]:
-        return settings.MONGODB_URL
 
     @classmethod
     def get_google_cloud_project(cls) -> Optional[str]:

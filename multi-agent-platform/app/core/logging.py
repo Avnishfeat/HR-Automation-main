@@ -36,8 +36,7 @@ class SecretsFilter(logging.Filter):
             # Explicitly list keys we want to mask
             keys_to_mask = [
                 "GEMINI_API_KEY",
-                "OPENAI_API_KEY",
-                "MONGODB_URL"
+                "OPENAI_API_KEY"
             ]
             
             for key in keys_to_mask:

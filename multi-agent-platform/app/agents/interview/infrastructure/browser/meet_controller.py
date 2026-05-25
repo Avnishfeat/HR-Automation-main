@@ -86,6 +86,16 @@ class MeetController:
             if self.user_data_dir:
                 profile_path = os.path.abspath(self.user_data_dir)
                 os.makedirs(profile_path, exist_ok=True)
+                
+                # FIX: Remove stale SingletonLock if previous run crashed
+                lock_file = os.path.join(profile_path, "SingletonLock")
+                if os.path.lexists(lock_file):
+                    try:
+                        os.remove(lock_file)
+                        logger.info(f"Removed stale SingletonLock at {lock_file}")
+                    except OSError as e:
+                        logger.warning(f"Could not remove SingletonLock: {e}")
+                
                 logger.info(f"Using persistent Chromium profile: {profile_path}")
                 self.browser = await self.playwright.chromium.launch_persistent_context(
                     user_data_dir=profile_path,

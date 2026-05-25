@@ -149,7 +149,7 @@ class STTService:
             stream = sd.InputStream(samplerate=self.samplerate, device=input_device, channels=1, callback=audio_callback, dtype='float32')
             stream.start(); recording_start = datetime.now()
             stt_thread = threading.Thread(target=stt_processor, daemon=True); stt_thread.start()
-            self._monitor_recording(recorded_chunks, stop_event, recording_start)
+            self._monitor_recording(recorded_chunks, stop_event, recording_start, session_id)
             stream.stop(); stream.close(); audio_queue.put(None); stt_thread.join(timeout=10)
             if recorded_chunks: threading.Thread(target=self._save_recorded_audio, args=(recorded_chunks, session_id, turn_count, is_follow_up), daemon=True).start()
             final_transcript = " ".join(transcript_parts).strip()
@@ -188,21 +188,54 @@ class STTService:
             stream = sd.InputStream(samplerate=self.samplerate, device=input_device, channels=1, callback=audio_callback, dtype='float32')
             stream.start(); recording_start = datetime.now()
             stt_thread = threading.Thread(target=stt_processor, daemon=True); stt_thread.start()
-            self._monitor_recording(recorded_chunks, stop_event, recording_start)
+            self._monitor_recording(recorded_chunks, stop_event, recording_start, session_id)
             stream.stop(); stream.close(); audio_queue.put(None); stt_thread.join(timeout=10)
             if recorded_chunks: threading.Thread(target=self._save_recorded_audio, args=(recorded_chunks, session_id, turn_count, is_follow_up), daemon=True).start()
             final_transcript = " ".join(transcript_parts).strip()
             return recording_start, final_transcript if final_transcript else "[No response]"
         except Exception: return None, "[Error]"
 
-    def _monitor_recording(self, recorded_chunks, stop_event, recording_start):
+    def _monitor_recording(self, recorded_chunks, stop_event, recording_start, session_id):
         speech_detected = False; silence_start_time = None; speech_start_time = None
         log_interval = 0
+        last_check_time = time.time()
+        
         while True:
             time.sleep(0.05)
             if stop_event and stop_event.is_set(): break
             elapsed = (datetime.now() - recording_start).total_seconds()
             if elapsed >= AudioConfig.MAX_RECORDING_DURATION_SEC: break
+            
+            # Smart Early Disconnect Detection (Check every 2 seconds)
+            current_time = time.time()
+            if current_time - last_check_time >= 2.0:
+                last_check_time = current_time
+                try:
+                    # ParticipantMonitor updates `malpractice_flags` via handlers, but the fastest
+                    # way without async blocking is just to check if the session is still active
+                    session_data = self.session_mgr.get_session(session_id)
+                    if session_data and 'stop_interview' in session_data:
+                        if session_data['stop_interview'].is_set():
+                            logger.info(f"[STT] Detected stop signal for {session_id}, aborting STT recording early.")
+                            break
+                        
+                        # Alternatively check for candidate disconnected via active loop in orchestrator
+                        # but if stop_event wasn't set, we can check participant count if we have the async loop
+                        controller = session_data.get('controller')
+                        if controller:
+                            import asyncio
+                            try:
+                                loop = asyncio.get_running_loop()
+                            except RuntimeError:
+                                loop = None
+                            
+                            if loop is None:
+                                # We're in a separate thread. We can't easily await the controller's async method.
+                                # However, if the Orchestrator loop triggers malpractice, the stop_event will be set.
+                                pass
+                except Exception as e:
+                    logger.debug(f"[STT] Disconnect check error: {e}")
+
             if len(recorded_chunks) > 5:
                 # Log volume roughly every second
                 log_interval += 1

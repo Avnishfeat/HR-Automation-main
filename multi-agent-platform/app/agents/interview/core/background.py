@@ -2,6 +2,7 @@
 import logging
 import asyncio
 import time
+import json
 from typing import Optional
 from pathlib import Path
 
@@ -33,7 +34,8 @@ async def start_and_conduct_interview_task(
     video_capture_method: str = "javascript",
     job_role: str = "Candidate",
     resume_content: str = "Not provided",
-    candidate_email: Optional[str] = None
+    candidate_email: str = "Not provided",
+    buss_id: str = "Not provided"
 ):
     """Background task - Stateless Local Storage Version (Async)"""
     logger.info(f"[Task: {session_id}] Background task started (Stateless/Async)")
@@ -134,7 +136,8 @@ async def start_and_conduct_interview_task(
                     ended_early,
                     background_person_count,
                     reconnection_count,
-                    candidate_email
+                    candidate_email,
+                    buss_id
                 ),
                 analysis_results,
                 "final_report"
@@ -160,9 +163,15 @@ async def start_and_conduct_interview_task(
                     if settings.ACTIONABL_AUTH_ID:
                         headers["auth-id"] = settings.ACTIONABL_AUTH_ID
                         
+                    actionabl_payload = {
+                        "event": "analysis_completed",
+                        "session_id": session_id,
+                        "analysis": json.dumps(final_report)
+                    }
+                        
                     dispatch_webhook(
                         actionabl_url, 
-                        final_report,  # Sending the analysis directly as requested
+                        actionabl_payload,
                         headers=headers
                     )
                 

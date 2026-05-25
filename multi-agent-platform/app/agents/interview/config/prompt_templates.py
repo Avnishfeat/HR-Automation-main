@@ -120,7 +120,7 @@ Analyze for:
 Provide ONLY JSON output."""
     
     @staticmethod
-    def final_combined_analysis(transcript_text: str, resume_excerpt: str, job_role: str, session_id: str, candidate_name: str, candidate_email: str, duration_sec: int, ended_early: bool, reconnections: int, background_persons: int) -> str:
+    def final_combined_analysis(transcript_text: str, resume_excerpt: str, job_role: str, session_id: str, candidate_name: str, candidate_email: str, buss_id: str, duration_sec: int, ended_early: bool, reconnections: int, background_persons: int) -> str:
         """Single prompt for the final combined JSON analysis."""
         return f"""You are an expert HR recruiter and technical evaluator.
 
@@ -128,6 +128,7 @@ Provide ONLY JSON output."""
 - Session ID: {session_id}
 - Candidate Name: {candidate_name}
 - Candidate Email: {candidate_email}
+- Buss ID: {buss_id}
 - Job Role: {job_role}
 - Duration (sec): {duration_sec}
 - Ended Early: {str(ended_early).lower()}
@@ -149,6 +150,7 @@ Analyze the interview transcript and performance. Provide the output EXACTLY as 
   "candidate": {{
     "name": "{candidate_name}",
     "email": "{candidate_email}",
+    "buss_id": "{buss_id}",
     "role": "{job_role}"
   }},
   "status": {{

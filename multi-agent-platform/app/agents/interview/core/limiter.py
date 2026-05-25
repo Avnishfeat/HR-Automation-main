@@ -111,8 +111,8 @@ class ConcurrencyLimiter:
             # Register this session
             self._active_sessions[session_id] = {
                 "status": "active",
-                "started_at": datetime.utcnow(),
-                "last_heartbeat": datetime.utcnow()
+                "started_at": datetime.now(timezone.utc),
+                "last_heartbeat": datetime.now(timezone.utc)
             }
 
             logger.info(f"ConcurrencyLimiter: Acquired slot for {session_id} ({active_count + 1}/{self.max_sessions})")
@@ -135,7 +135,7 @@ class ConcurrencyLimiter:
         """Update heartbeat timestamp for a session."""
         try:
             if session_id in self._active_sessions:
-                self._active_sessions[session_id]["last_heartbeat"] = datetime.utcnow()
+                self._active_sessions[session_id]["last_heartbeat"] = datetime.now(timezone.utc)
         except Exception as e:
             logger.warning(f"ConcurrencyLimiter: Heartbeat failed: {e}")
 

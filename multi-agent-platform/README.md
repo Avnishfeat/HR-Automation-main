@@ -81,15 +81,7 @@ response = await llm_service.generate(
 )
 ```
 
-### 2. Database Service
-```python
-from app.services.database import DatabaseService
-
-collection = DatabaseService.get_collection("db_name", "collection_name")
-await collection.insert_one({"key": "value"})
-```
-
-### 3. File Service
+### 2. File Service
 ```python
 from app.core.dependencies import get_file_service
 
@@ -97,7 +89,7 @@ file_service = get_file_service()
 result = await file_service.save_file(uploaded_file)
 ```
 
-### 4. WebSocket Manager
+### 3. WebSocket Manager
 ```python
 from app.core.dependencies import get_websocket_manager
 
@@ -123,10 +115,6 @@ await ws_manager.send_message("Hello", client_id)
 
 ## 🐛 Troubleshooting
 
-### MongoDB Connection Issues
-- Ensure MongoDB is running
-- Check MONGODB_URL in .env
-
 ### Import Errors
 - Ensure virtual environment is activated
 - Run `pip install -r requirements.txt`
@@ -134,6 +122,4 @@ await ws_manager.send_message("Hello", client_id)
 ## 📚 Resources
 
 - FastAPI Docs: https://fastapi.tiangolo.com
-- Motor (MongoDB): https://motor.readthedocs.io
 - Pydantic: https://docs.pydantic.dev
-#output

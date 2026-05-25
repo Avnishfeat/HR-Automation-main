@@ -518,7 +518,7 @@ class MeetInterviewOrchestrator:
         return False
 
     async def _wait_for_rejoin(self, session: InterviewSession) -> bool:
-        MAX_WAIT_SECONDS = 180
+        MAX_WAIT_SECONDS = InterviewTiming.CANDIDATE_REJOIN_TIMEOUT_SEC
         POLL_INTERVAL = 2
 
         if await self._candidate_present(session):
@@ -536,6 +536,7 @@ class MeetInterviewOrchestrator:
         while time.time() - start_time < MAX_WAIT_SECONDS:
             self._heartbeat_session(session.session_id)
             if session.stop_event.is_set(): return False
+
             
             # Periodic logging
             current_time = time.time()

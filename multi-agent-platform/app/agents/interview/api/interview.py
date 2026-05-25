@@ -34,7 +34,8 @@ async def start_google_meet_interview(
     job_description: Optional[str] = Form(None),
     video_capture_method: str = Form("javascript"),
     webhook_url: Optional[str] = Form(None),
-    candidate_email: Optional[str] = Form(None),
+    candidate_email: str = Form(...),
+    buss_id: str = Form(...),
     resume: UploadFile = File(...)
 ):
     """
@@ -119,7 +120,8 @@ async def start_google_meet_interview(
             video_capture_method=video_capture_method,
             job_role=job_role,
             resume_content=resume_content,
-            candidate_email=candidate_email
+            candidate_email=candidate_email,
+            buss_id=buss_id
         )
         
     except Exception as e:

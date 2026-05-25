@@ -179,6 +179,11 @@ class MeetSessionManager:
             except Exception as e:
                 logger.warning(f"Participant count check failed for {session_id}: {e}")
                 consecutive_joins = 0
+                
+                # If browser or page is closed, abort immediately to avoid spamming errors
+                if not ctrl.page or ctrl.page.is_closed() or not ctrl.browser:
+                    logger.error(f"Session {session_id}: Browser/Page closed unexpectedly during wait_for_candidate.")
+                    return False
 
             try:
                 await asyncio.wait_for(session['stop_interview'].wait(), timeout=VideoConfig.STABILITY_CHECK_INTERVAL_SEC)
