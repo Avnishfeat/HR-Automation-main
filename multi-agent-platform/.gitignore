@@ -139,3 +139,5 @@ logs/
 pytest.ini
 new_analysis_schema.json
 scripts/
+.codex
+ecosystem.config.js

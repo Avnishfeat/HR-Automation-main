@@ -94,10 +94,11 @@ async def start_and_conduct_interview_task(
             logger.error(f"Orchestration failed: {e}", exc_info=True)
             
         duration_sec = int(time.time() - interview_start_time)
+        orchestration_status = None
         ended_early = False
         if isinstance(orchestration_result, dict):
-            status = orchestration_result.get("status")
-            if status and status != SessionStatus.COMPLETED:
+            orchestration_status = orchestration_result.get("status")
+            if orchestration_status and orchestration_status != SessionStatus.COMPLETED:
                 ended_early = True
         else:
             ended_early = True # Fallback if we didn't get a proper dict
@@ -149,6 +150,24 @@ async def start_and_conduct_interview_task(
         # 5. Dispatch Webhook
         try:
             final_report = analysis_results.get("final_report")
+            if not final_report:
+                final_report = _build_fallback_final_report(
+                    session_id=session_id,
+                    candidate_name=candidate_name,
+                    candidate_email=candidate_email,
+                    buss_id=buss_id,
+                    job_role=job_role,
+                    duration_sec=duration_sec,
+                    ended_early=ended_early,
+                    orchestration_status=orchestration_status,
+                    transcript_text=transcript_text,
+                    background_person_count=background_person_count,
+                    reconnection_count=reconnection_count,
+                )
+                logger.warning(
+                    "Using fallback final report for webhook because analysis output was empty. "
+                    f"session_id={session_id}, status={orchestration_status}"
+                )
 
             if final_report:
                 # 1. Actionabl Webhook Integration
@@ -182,7 +201,7 @@ async def start_and_conduct_interview_task(
                         "event": "analysis_completed",
                         "session_id": session_id,
                         "transcript_path": str(transcript_path),
-                        "analysis": final_report
+                        "analysis": json.dumps(final_report)
                     })
                     
                 # Always cleanup if we successfully generated the report, regardless of webhook success
@@ -229,3 +248,67 @@ async def _cleanup_in_memory_session(session_id, interview_service, meet_session
     if concurrency_limiter:
         concurrency_limiter.release(session_id)
     logger.info(f"In-memory session data cleaned after webhook success for {session_id}")
+
+
+def _build_fallback_final_report(
+    session_id: str,
+    candidate_name: str,
+    candidate_email: str,
+    buss_id: str,
+    job_role: str,
+    duration_sec: int,
+    ended_early: bool,
+    orchestration_status: Optional[str],
+    transcript_text: str,
+    background_person_count: int,
+    reconnection_count: int,
+):
+    termination_reason = None
+    flags = []
+
+    if ended_early:
+        flags.append("ended_interview_early")
+
+    if orchestration_status == "terminated_liveness_fail":
+        termination_reason = "mid_interview_liveness_failed"
+        flags.append("mid_interview_liveness_failed")
+    elif orchestration_status:
+        termination_reason = orchestration_status
+        flags.append(orchestration_status)
+
+    return {
+        "session_id": session_id,
+        "candidate": {
+            "name": candidate_name,
+            "email": candidate_email,
+            "buss_id": buss_id,
+            "role": job_role,
+        },
+        "status": {
+            "completed": not ended_early,
+            "ended_early": ended_early,
+            "duration_sec": duration_sec,
+            "termination_reason": termination_reason,
+        },
+        "scores": {
+            "overall": None,
+            "technical": None,
+            "communication": None,
+            "behavioral": None,
+            "authenticity": 1.0 if orchestration_status == "terminated_liveness_fail" else None,
+        },
+        "flags": flags,
+        "summary": (
+            "Interview ended because the candidate failed the mid-interview liveness check."
+            if orchestration_status == "terminated_liveness_fail"
+            else "Interview ended before a generated analysis report was available."
+        ),
+        "recommendation": "review",
+        "transcript": [],
+        "raw_transcript": transcript_text or "No transcript generated.",
+        "metadata": {
+            "reconnections": reconnection_count,
+            "background_persons": background_person_count,
+            "analysis_fallback": True,
+        },
+    }

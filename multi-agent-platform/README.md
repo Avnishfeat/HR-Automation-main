@@ -27,12 +27,42 @@ cp config/.env.example .env
 # Edit .env with your configuration
 ```
 
-### 5. Run the application
+### 5. Run the application (Development)
 ```bash
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --port 8048
 ```
 
-Visit http://localhost:7010/docs for API documentation
+### 6. Run the application (Production with PM2 & Nginx)
+
+In a production environment, the backend runs on port `8048` managed by PM2, and Nginx listens on port `7010` to reverse proxy traffic to it.
+
+#### A. Start the Backend (PM2)
+```bash
+pm2 start ecosystem.config.js
+```
+
+#### B. Setup Nginx Reverse Proxy
+Copy the nginx config and reload:
+```bash
+sudo cp deploy/nginx/multi-agent-platform.conf /etc/nginx/sites-available/multi-agent-platform
+sudo systemctl reload nginx
+```
+
+#### C. Useful PM2 Commands
+```bash
+# Check status
+pm2 status
+
+# View real-time logs
+pm2 logs multi-agent-backend
+
+# Restart application
+pm2 restart multi-agent-backend
+
+# Stop application
+pm2 stop multi-agent-backend
+```
+
 
 ## 📁 Project Structure
 

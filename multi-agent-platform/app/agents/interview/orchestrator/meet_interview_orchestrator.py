@@ -368,6 +368,13 @@ class MeetInterviewOrchestrator:
 
         if not snapshot_bytes:
             logger.warning("Spot check failed: Could not capture snapshot.")
+            await self._play_text_with_cache(
+                "I am unable to verify your video feed. Ending the session.",
+                "spot_check_fail",
+                session,
+                state.turn_count,
+                log_if_stopped=True
+            )
             return False
 
         passed = await asyncio.to_thread(self.liveness_svc.verify_challenge, snapshot_bytes, challenge_type)
@@ -381,7 +388,11 @@ class MeetInterviewOrchestrator:
         else:
             logger.warning("Spot Check FAILED (Attempt 1). Retrying...")
             await self._play_text_with_cache(
-                "I couldn't verify that. Please look to your left clearly.", "spot_check_retry", session, state.turn_count
+                "I couldn't verify that. Please look to your left clearly.",
+                "spot_check_retry",
+                session,
+                state.turn_count,
+                log_if_stopped=True
             )
             await asyncio.sleep(2.5)
 
@@ -397,7 +408,11 @@ class MeetInterviewOrchestrator:
                 
             logger.error("Spot Check FAILED Final.")
             await self._play_text_with_cache(
-                "I am unable to verify your video feed. Ending the session.", "spot_check_fail", session, state.turn_count
+                "I am unable to verify your video feed. Ending the session.",
+                "spot_check_fail",
+                session,
+                state.turn_count,
+                log_if_stopped=True
             )
             return False
 
@@ -459,8 +474,18 @@ class MeetInterviewOrchestrator:
         audio_path = get_user_audio_path_for_stt(session.session_id, turn_count, is_follow_up)
         return ResponseData(transcript, audio_path, start_time, end_time, turn_count, is_follow_up)
 
-    async def _play_text_with_cache(self, text: str, cache_key: str, session: InterviewSession, turn_count: int) -> bool:
-        if session.stop_event.is_set(): return False
+    async def _play_text_with_cache(
+        self,
+        text: str,
+        cache_key: str,
+        session: InterviewSession,
+        turn_count: int,
+        log_if_stopped: bool = False
+    ) -> bool:
+        if session.stop_event.is_set():
+            if log_if_stopped:
+                self.interview_svc.log_assistant_message(session.session_id, text, turn_count)
+            return False
         self.interview_svc.log_assistant_message(session.session_id, text, turn_count)
         path = self.interview_svc.get_static_audio_path(text, cache_key)
         if not path: return False
