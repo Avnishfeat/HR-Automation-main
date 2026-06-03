@@ -1,3 +1,4 @@
+import contextlib
 # app/core/startup.py
 import logging
 from typing import Optional
@@ -132,8 +133,23 @@ def initialize_services():
         logger.critical(f"CRITICAL: Failed to initialize services: {e}", exc_info=True)
         raise ServiceInitializationError("Unknown Service", str(e))
 
+
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for app startup and shutdown"""
+    # Startup
+    await start_cleanup_task()
+    logger.info("Zombie cleanup task started")
+    yield
+    # Shutdown
+    logger.info("Shutting down application...")
+    await stop_cleanup_task()
+    from app.agents.interview.services.gemini_service import GeminiService
+    GeminiService.cleanup_shared_client()
+    logger.info("Application shutdown complete")
+
 def create_app() -> FastAPI:
-    app = FastAPI(
+    app = FastAPI(lifespan=lifespan, 
         title="AI Interviewer API",
         description="Conducts interviews and provides combined analysis."
     )
@@ -157,20 +173,10 @@ def create_app() -> FastAPI:
         return {"status": "AI Interviewer API is running"}
     
     # Register startup event for cleanup task
-    @app.on_event("startup")
-    async def startup_event():
-        """Start background cleanup task on app startup"""
-        await start_cleanup_task()
-        logger.info(" Zombie cleanup task started")
+    
     
     # Add shutdown handler to gracefully close HTTP connections
-    @app.on_event("shutdown")
-    async def shutdown_event():
-        """Cleanup connections on application shutdown"""
-        logger.info("Shutting down application...")
-        await stop_cleanup_task()
-        GeminiService.cleanup_shared_client()
-        logger.info(" Application shutdown complete")
+    
     
     return app
 

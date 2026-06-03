@@ -150,34 +150,27 @@ class LivenessChallengeService:
 
     def _check_head_turn(self, landmarks, direction: str) -> bool:
         """
-        Checks if the head is turned by comparing nose X to shoulder midpoint.
+        Checks if the head is turned by comparing nose-to-ear distances.
         """
         nose = landmarks[self.mp_pose.PoseLandmark.NOSE]
-        l_shoulder = landmarks[self.mp_pose.PoseLandmark.LEFT_SHOULDER]
-        r_shoulder = landmarks[self.mp_pose.PoseLandmark.RIGHT_SHOULDER]
+        l_ear = landmarks[self.mp_pose.PoseLandmark.LEFT_EAR]
+        r_ear = landmarks[self.mp_pose.PoseLandmark.RIGHT_EAR]
         
-        # Midpoint X between shoulders
-        shoulder_mid_x = (l_shoulder.x + r_shoulder.x) / 2
+        # Calculate horizontal distances from nose to ears
+        dist_l_ear = abs(nose.x - l_ear.x)
+        dist_r_ear = abs(nose.x - r_ear.x)
         
-        # Calculate offset (how far nose is from center)
-        # If looking LEFT (our left), Nose X should be smaller (closer to 0)
-        # If looking RIGHT (our right), Nose X should be larger (closer to 1)
+        # Calculate ratio of distances. If looking straight, ratio is ~1.0.
+        # If looking far to one side, one ear becomes much closer (or hidden)
+        # while the other ear is visible, making the ratio heavily skewed.
+        # To avoid divide-by-zero, add a small epsilon.
+        ratio = dist_l_ear / (dist_r_ear + 0.001)
         
-        offset = nose.x - shoulder_mid_x
-        logger.info(f"Head Turn Check ({direction}): Offset={offset:.2f}")
+        logger.info(f"Head Turn Check: L_Ear_Dist={dist_l_ear:.3f}, R_Ear_Dist={dist_r_ear:.3f}, Ratio={ratio:.2f}")
 
-        # Thresholds (how much turn is required?)
-        # 0.10 means the nose moved 10% of screen width away from center
-        if direction == "left":
-            # Typically positive if mirrored? It depends on camera mirror settings.
-            # Let's assume standard webcam mirroring:
-            # Looking Left -> Nose moves Right on screen (Positive offset)
-            # looking Right -> Nose moves Left on screen (Negative offset)
-            
-            # We accept EITHER direction to handle mirror confusion
-            return abs(offset) > 0.10
-            
-        elif direction == "right":
-            return abs(offset) > 0.10
+        # If looking left or right, the ratio will skew.
+        # A normal 30-45 degree turn results in a ratio around 0.65 or 1.5.
+        # We accept either extreme to handle webcam mirror confusion.
+        return ratio > 1.35 or ratio < 0.75
             
         return False

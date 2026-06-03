@@ -1,6 +1,6 @@
 # app/services/transcript_manager.py
 import logging
-from datetime import datetime
+from datetime import datetime, timezone, UTC
 from typing import Optional, Dict, List
 import threading
 
@@ -47,7 +47,7 @@ class TranscriptManager:
                 "role": "assistant",
                 "text": text,
                 "turn": turn_count,
-                "timestamp": datetime.utcnow()
+                "timestamp": datetime.now(timezone.utc)
             })
 
     def process_and_log_transcript(
@@ -75,7 +75,7 @@ class TranscriptManager:
                     "end_time": end_time,
                     "is_follow_up": is_follow_up_response,
                     "turn": turn_count,
-                    "timestamp": datetime.utcnow()
+                    "timestamp": datetime.now(timezone.utc)
                 })
 
             # 2. Update In-Memory State for next question generation
@@ -103,7 +103,7 @@ class TranscriptManager:
             lines = []
             lines.append(f"--- Interview Transcript ---")
             lines.append(f"Session ID: {session_id}")
-            lines.append(f"Date: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+            lines.append(f"Date: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
             lines.append("--------------------------------\n")
 
             # Append Conversation

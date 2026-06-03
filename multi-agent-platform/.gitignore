@@ -128,11 +128,10 @@ chrome_profile/
 uploads/
 service_account.json
 
-tests
+.gemini
 tests/
 uploads/
 /.antigravitycli
-.gemini
 /.data
 deploy/
 logs/

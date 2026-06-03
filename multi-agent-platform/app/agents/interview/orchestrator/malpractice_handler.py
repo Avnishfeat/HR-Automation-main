@@ -7,7 +7,7 @@ import logging
 import threading
 import time
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone, UTC
 from typing import TYPE_CHECKING
 
 from app.agents.interview.config.constants import SessionStatus
@@ -55,7 +55,7 @@ class MalpracticeHandler:
                     'type': violation_type,
                     'participant_count': count,
                     'participant_names': names,
-                    'detected_at': datetime.utcnow().isoformat(),
+                    'detected_at': datetime.now(timezone.utc).isoformat(),
                     'session_id': session.session_id
                 },
                 'status': SessionStatus.ERROR_MULTIPLE_PARTICIPANTS
@@ -139,12 +139,12 @@ class MalpracticeHandler:
                     'type': 'malpractice_violation',
                     'reason': 'multiple_participants',
                     'participant_count': participant_count,
-                    'detected_at': datetime.utcnow().isoformat(),
+                    'detected_at': datetime.now(timezone.utc).isoformat(),
                     'session_id': session_id,
                     'action_taken': 'interview_terminated'
                 },
                 'status': SessionStatus.ERROR_MULTIPLE_PARTICIPANTS,
-                'terminated_at': datetime.utcnow().isoformat()
+                'terminated_at': datetime.now(timezone.utc).isoformat()
             }
             logger.warning(f"Malpractice logged for {session_id}: {incident_data}")
         except Exception as e:

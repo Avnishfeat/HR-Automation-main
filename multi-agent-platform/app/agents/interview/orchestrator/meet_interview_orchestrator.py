@@ -497,7 +497,7 @@ class MeetInterviewOrchestrator:
         
         success = await asyncio.to_thread(self.audio_handler.play_wav_file, path, session.meet, session.stop_event)
         
-        await asyncio.sleep(1.0)  # Drain virtual cable before disabling mic
+        await asyncio.sleep(1.5)  # Drain virtual cable before disabling mic
         await session.meet.disable_microphone()
         return success
 

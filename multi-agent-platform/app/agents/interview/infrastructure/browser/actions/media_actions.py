@@ -31,7 +31,9 @@ class MediaActions:
                 return True
             return False
         except Exception as e:
-            logger.error(f"Error turning off camera: {e}")
+            err_msg = str(e).lower()
+            if "closed" not in err_msg and "target" not in err_msg and "disconnect" not in err_msg:
+                logger.error(f"Error turning off camera: {e}")
             return False
     
     async def turn_on_camera(self) -> bool:
@@ -51,7 +53,9 @@ class MediaActions:
                 return True
             return False
         except Exception as e:
-            logger.error(f"Error turning on camera: {e}")
+            err_msg = str(e).lower()
+            if "closed" not in err_msg and "target" not in err_msg and "disconnect" not in err_msg:
+                logger.error(f"Error turning on camera: {e}")
             return False
     
     async def enable_microphone(self) -> bool:
@@ -71,7 +75,9 @@ class MediaActions:
                 return True
             return False
         except Exception as e:
-            logger.error(f"Error enabling microphone: {e}")
+            err_msg = str(e).lower()
+            if "closed" not in err_msg and "target" not in err_msg and "disconnect" not in err_msg:
+                logger.error(f"Error enabling microphone: {e}")
             return False
     
     async def disable_microphone(self) -> bool:
@@ -91,7 +97,9 @@ class MediaActions:
                 return True
             return False
         except Exception as e:
-            logger.error(f"Error disabling microphone: {e}")
+            err_msg = str(e).lower()
+            if "closed" not in err_msg and "target" not in err_msg and "disconnect" not in err_msg:
+                logger.error(f"Error disabling microphone: {e}")
             return False
     
     async def turn_off_microphone_at_join(self) -> bool:
@@ -111,5 +119,7 @@ class MediaActions:
                 return True
             return False
         except Exception as e:
-            logger.error(f"Error turning off microphone at join screen: {e}")
+            err_msg = str(e).lower()
+            if "closed" not in err_msg and "target" not in err_msg and "disconnect" not in err_msg:
+                logger.error(f"Error turning off microphone at join screen: {e}")
             return False

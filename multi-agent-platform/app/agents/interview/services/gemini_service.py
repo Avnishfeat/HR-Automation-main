@@ -19,6 +19,7 @@ class GeminiService:
     def __init__(self):
         self.active_chat_sessions: Dict[str, Any] = {}
         self._session_token_counts = defaultdict(lambda: {'prompt': 0, 'response': 0, 'total': 0})
+        self.session_metadata: Dict[str, Any] = {}
         self.client = None
         self._initialize_client()
 
@@ -46,6 +47,7 @@ class GeminiService:
         if not self.client: raise ServiceInitializationError("Gemini", "Client not initialized")
         system_prompt = self._build_system_prompt(resume_text, questionnaire, job_role, job_description)
         self._session_token_counts[session_id] = {'prompt': 0, 'response': 0, 'total': 0}
+        self.session_metadata[session_id] = {'job_role': job_role, 'job_description': job_description}
         history = [{"role": "user", "parts": [{"text": system_prompt}]}, {"role": "model", "parts": [{"text": "Understood."}]}]
         self.active_chat_sessions[session_id] = self.client.chats.create(model=self.MODEL_NAME, history=history, config=self._get_config(0.7))
 
@@ -72,6 +74,7 @@ class GeminiService:
     def end_session(self, session_id: str):
         self.active_chat_sessions.pop(session_id, None)
         self._session_token_counts.pop(session_id, None)
+        self.session_metadata.pop(session_id, None)
 
     def _build_system_prompt(self, resume_text, questionnaire, job_role, job_description):
         return (
@@ -82,6 +85,39 @@ class GeminiService:
             f"Respond in raw text, short sentences, conversational tone. Do NOT state that you are evaluating their resume. "
             f"If the candidate asks you to repeat a question, do NOT just repeat your previous response word-for-word. Instead, acknowledge the request naturally (e.g., 'Sure, I can repeat that') and rephrase the question slightly so it sounds more conversational and natural."
         )
+
+    def correct_transcript(self, session_id: str, transcript: str) -> str:
+        if not self.client:
+            return transcript
+            
+        metadata = self.session_metadata.get(session_id, {})
+        job_role = metadata.get('job_role', 'Unknown')
+        job_description = metadata.get('job_description', '')
+        
+        system_instruction = (
+            f"You are a strict text corrector. Your task is to fix phonetic mishearings, spelling mistakes, "
+            f"and tech jargon errors in the following FULL interview transcript. "
+            f"The candidate is interviewing for a {job_role} role. "
+            f"Context JD: {job_description}\n\n"
+            f"CRITICAL RULES:\n"
+            f"- ONLY fix misspellings (e.g., 'react native' -> 'React Native', 'past API' -> 'FastAPI').\n"
+            f"- DO NOT change grammar, phrasing, or the meaning of the sentences.\n"
+            f"- DO NOT add conversational filler, summarize, or respond to the text.\n"
+            f"- MUST maintain the exact original formatting, timestamps, and turn numbers.\n"
+            f"- Return ONLY the corrected transcript, nothing else."
+        )
+        
+        try:
+            res = self.client.models.generate_content(
+                model=self.MODEL_NAME, 
+                contents=[system_instruction, transcript], 
+                config=self._get_config(0.0)
+            )
+            corrected = (res.text or transcript).strip()
+            return corrected
+        except Exception as e:
+            logger.error(f"Transcript correction failed: {e}")
+            return transcript
 
     @classmethod
     def cleanup_shared_client(cls): pass

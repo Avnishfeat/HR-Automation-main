@@ -236,7 +236,11 @@ class AudioHandler:
                 time.sleep(0.05)
                 wait_time += 0.05
             
-            output_device = self.virtual_output or sd.default.device[1]
+            output_device = self.virtual_output if self.virtual_output is not None else sd.default.device[1]
+            
+            if output_device == -1:
+                logger.error("No valid audio output device found (device index is -1). Aborting playback.")
+                return False
             
             stream = sd.OutputStream(
                 samplerate=samplerate or self.target_samplerate,

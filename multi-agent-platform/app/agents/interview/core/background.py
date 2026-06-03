@@ -285,7 +285,7 @@ def _build_fallback_final_report(
             "role": job_role,
         },
         "status": {
-            "completed": not ended_early,
+            "completed": True,
             "ended_early": ended_early,
             "duration_sec": duration_sec,
             "termination_reason": termination_reason,

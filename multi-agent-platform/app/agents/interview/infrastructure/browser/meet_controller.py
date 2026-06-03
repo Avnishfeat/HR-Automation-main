@@ -62,10 +62,7 @@ class MeetController:
                 args.extend([
                     '--use-fake-ui-for-media-stream',
                     '--enable-usermedia-screen-capturing',
-                    '--allow-file-access-from-files',
-                    '--disable-audio-processing',
-                    '--disable-noise-suppression',
-                    '--disable-echo-cancellation'
+                    '--allow-file-access-from-files'
                 ])
             else:
                 logger.info("Configuring Playwright with fake audio devices")
@@ -76,12 +73,14 @@ class MeetController:
 
             env = os.environ.copy()
             if self.use_vb_audio and os.name != 'nt':
-                # Force PulseAudio/PipeWire to use the correct virtual devices for Chromium
-                # Google Meet Speaker -> BotMic
-                # Google Meet Microphone -> BotSpeaker.monitor
+                # Chromium actively hides .monitor sources, so we must proxy it through a virtual source
+                os.system("for id in $(pactl list modules short | grep module-virtual-source | awk '{print $1}'); do pactl unload-module $id; done || true")
+                os.system("pactl load-module module-virtual-source source_name=BotSpeaker_Virtual master=BotSpeaker.monitor || true")
+                os.system("pactl set-default-source output.BotSpeaker_Virtual || true")
+                os.system("pactl set-default-sink BotMic || true")
                 env["PULSE_SINK"] = "BotMic"
-                env["PULSE_SOURCE"] = "BotSpeaker.monitor"
-                logger.info("Set PULSE_SINK=BotMic and PULSE_SOURCE=BotSpeaker.monitor for Chromium")
+                env["PULSE_SOURCE"] = "output.BotSpeaker_Virtual"
+                logger.info("Set PULSE_SINK=BotMic and PULSE_SOURCE=output.BotSpeaker_Virtual for Chromium")
 
             if self.user_data_dir:
                 profile_path = os.path.abspath(self.user_data_dir)

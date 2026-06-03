@@ -15,22 +15,29 @@ class ParticipantTracker:
     
     async def _execute_js_safely(self, script: str, error_msg: str = "JS execution failed"):
         try:
+            if self.page.is_closed():
+                return -1
             return await self.page.evaluate(script)
         except Exception as e:
+            err_msg = str(e).lower()
+            if "closed" in err_msg or "target" in err_msg or "disconnect" in err_msg:
+                return -1
             logger.error(f"{error_msg}: {e}")
             return None
     
     async def get_participant_count(self) -> int:
-        if not self.page:
-            return 0
+        if not self.page or self.page.is_closed():
+            return -1
         
         # Method 1: Count unique data-participant-id attributes
         count = await self._count_via_participant_ids()
+        if count == -1: return -1
         if count and count >= 1:
             return count
         
         # Method 2: Fallback to video elements
         count = await self._count_via_visible_videos()
+        if count == -1: return -1
         if count and count >= 1:
             return count
             

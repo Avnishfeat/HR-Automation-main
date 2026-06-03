@@ -1,6 +1,7 @@
 # app/orchestrator/response_handler.py
 import logging
 import asyncio
+import re
 from typing import Callable, Awaitable
 
 from .types import (
@@ -31,21 +32,19 @@ class InterviewResponseHandler:
         if not transcript or transcript == "[No response]":
             return await self._handle_no_response(session, state, response, record_next_callback)
 
-        # 2. Prevent candidate from ending the interview early.
-        # If they try to exit, politely deny and redirect.
+        # 2. Treat clear leave/reschedule requests as a valid polite end.
         if self._looks_like_exit_request(transcript):
-            logger.info("Exit request detected; denying exit and redirecting.")
+            logger.info("Exit request detected; ending interview politely.")
             await self._play_audio(
                 session,
-                StaticMessages.EXIT_REDIRECT,
-                "exit_redirect",
+                StaticMessages.EXIT_POLITE_CLOSE,
+                StaticMessages.CACHE_KEY_EXIT_POLITE_CLOSE,
                 state.turn_count
             )
-            await self._replay_last_question(session, state)
             await asyncio.sleep(1.5)
             await session.meet.disable_microphone()
-            new_response = await record_next_callback(session, state.turn_count + 1, False)
-            return HandlerResult(final_response=new_response, proceed=True)
+            session.stop_event.set()
+            return HandlerResult(final_response=response, proceed=True)
 
         # 3. Default: treat as a normal answer or control request that the
         # main interview prompt can respond to directly.
@@ -91,22 +90,18 @@ class InterviewResponseHandler:
 
     @staticmethod
     def _looks_like_exit_request(transcript: str) -> bool:
-        text = transcript.lower()
-        exit_phrases = (
-            "end the interview",
-            "stop the interview",
-            "quit the interview",
-            "leave the interview",
-            "end this interview",
-            "stop this interview",
-            "quit this interview",
-            "i want to end",
-            "i want to stop",
-            "i want to quit",
-            "can we stop",
-            "can we end",
-            "please stop",
-            "please end",
-            "terminate the interview",
+        text = transcript.lower().strip()
+        exit_patterns = (
+            r"\b(?:end|stop|quit|terminate)\s+(?:the\s+|this\s+)?(?:interview|meeting|call)\b",
+            r"\bleave\s+(?:the\s+|this\s+)?(?:interview|meeting|call)\b",
+            r"\b(?:can|could)\s+we\s+(?:stop|end)(?:\s+(?:the\s+|this\s+)?(?:interview|meeting|call))?\b",
+            r"\bplease\s+(?:stop|end)(?:\s+(?:the\s+|this\s+)?(?:interview|meeting|call))?\b",
+            r"\b(?:please\s+)?reschedule\b",
+            r"\bschedule\s+another\s+interview\b",
+            r"\banother\s+interview\s+in\s+the\s+next\s+round\b",
+            r"\bmy\s+time\s+is\s+draining\b",
+            r"\bi\s+(?:want|need|have)\s+to\s+(?:end|stop|quit)(?:\s+(?:now|early|soon|today|the\s+interview|this\s+interview|the\s+meeting|this\s+meeting|the\s+call|this\s+call)\b|[.!?,]?$)",
+            r"\bi\s+(?:want|need|have)\s+to\s+leave(?:\s+(?:now|early|soon|today|because|for|the\s+interview|this\s+interview|the\s+meeting|this\s+meeting|the\s+call|this\s+call)\b|[.!?,]?$)",
+            r"\bi\s+(?:have|need)\s+to\s+go(?:\s+(?:now|early|soon|today)\b|[.!?,]?$)",
         )
-        return any(phrase in text for phrase in exit_phrases)
+        return any(re.search(pattern, text) for pattern in exit_patterns)

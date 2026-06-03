@@ -55,6 +55,10 @@ class ParticipantMonitor:
 
                 if self.total_checks % 10 == 0:
                     logger.debug(f"Participant Check: {current_count}")
+                    
+                if current_count == -1:
+                    logger.info("Browser connection closed. Stopping monitor without violation.")
+                    break
 
                 if current_count < ParticipantThresholds.MIN_VALID_COUNT:
                     logger.warning(f"Candidate disconnected detected in monitoring loop. Count: {current_count}")

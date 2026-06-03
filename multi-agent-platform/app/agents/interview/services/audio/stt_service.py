@@ -11,6 +11,7 @@ import threading
 import soundfile as sf
 import io
 from pathlib import Path
+from dataclasses import dataclass, field
 
 # V1 imports
 try:
@@ -38,6 +39,33 @@ from app.agents.interview.config.constants import AudioConfig, ServiceConfig
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+@dataclass
+class RecordingState:
+    recording_start: datetime
+    recording_started_at: float = field(default_factory=time.time)
+    last_transcript_at: Optional[float] = None
+    has_transcript: bool = False
+    last_speech_volume_at: Optional[float] = None
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def mark_transcript(self):
+        with self.lock:
+            self.has_transcript = True
+            self.last_transcript_at = time.time()
+
+    def mark_speech_volume(self):
+        with self.lock:
+            self.last_speech_volume_at = time.time()
+
+    def snapshot(self):
+        with self.lock:
+            return {
+                "recording_started_at": self.recording_started_at,
+                "last_transcript_at": self.last_transcript_at,
+                "has_transcript": self.has_transcript,
+                "last_speech_volume_at": self.last_speech_volume_at,
+            }
 
 class STTService:
     def __init__(self, session_manager: MeetSessionManager):
@@ -145,11 +173,13 @@ class STTService:
                         if response.results and response.results[0].is_final:
                             if response.results[0].alternatives:
                                 transcript_parts.append(response.results[0].alternatives[0].transcript)
+                                recording_state.mark_transcript()
                 except Exception: pass
             stream = sd.InputStream(samplerate=self.samplerate, device=input_device, channels=1, callback=audio_callback, dtype='float32')
             stream.start(); recording_start = datetime.now()
+            recording_state = RecordingState(recording_start=recording_start)
             stt_thread = threading.Thread(target=stt_processor, daemon=True); stt_thread.start()
-            self._monitor_recording(recorded_chunks, stop_event, recording_start, session_id)
+            self._monitor_recording(recorded_chunks, stop_event, recording_start, session_id, recording_state)
             stream.stop(); stream.close(); audio_queue.put(None); stt_thread.join(timeout=10)
             if recorded_chunks: threading.Thread(target=self._save_recorded_audio, args=(recorded_chunks, session_id, turn_count, is_follow_up), daemon=True).start()
             final_transcript = " ".join(transcript_parts).strip()
@@ -179,23 +209,30 @@ class STTService:
                     for response in responses:
                         if response.results:
                             for result in response.results:
-                                if not result.is_final and result.alternatives and on_interim_transcript:
-                                    try: on_interim_transcript(result.alternatives[0].transcript)
+                                if not result.alternatives:
+                                    continue
+                                transcript_text = result.alternatives[0].transcript
+                                if transcript_text:
+                                    recording_state.mark_transcript()
+                                if not result.is_final and transcript_text and on_interim_transcript:
+                                    try: on_interim_transcript(transcript_text)
                                     except Exception: pass
                                 if result.is_final and result.alternatives:
-                                    transcript_parts.append(result.alternatives[0].transcript)
+                                    transcript_parts.append(transcript_text)
                 except Exception: pass
             stream = sd.InputStream(samplerate=self.samplerate, device=input_device, channels=1, callback=audio_callback, dtype='float32')
             stream.start(); recording_start = datetime.now()
+            recording_state = RecordingState(recording_start=recording_start)
             stt_thread = threading.Thread(target=stt_processor, daemon=True); stt_thread.start()
-            self._monitor_recording(recorded_chunks, stop_event, recording_start, session_id)
+            self._monitor_recording(recorded_chunks, stop_event, recording_start, session_id, recording_state)
             stream.stop(); stream.close(); audio_queue.put(None); stt_thread.join(timeout=10)
             if recorded_chunks: threading.Thread(target=self._save_recorded_audio, args=(recorded_chunks, session_id, turn_count, is_follow_up), daemon=True).start()
             final_transcript = " ".join(transcript_parts).strip()
             return recording_start, final_transcript if final_transcript else "[No response]"
         except Exception: return None, "[Error]"
 
-    def _monitor_recording(self, recorded_chunks, stop_event, recording_start, session_id):
+    def _monitor_recording(self, recorded_chunks, stop_event, recording_start, session_id, recording_state: Optional[RecordingState] = None):
+        recording_state = recording_state or RecordingState(recording_start=recording_start)
         speech_detected = False; silence_start_time = None; speech_start_time = None
         log_interval = 0
         last_check_time = time.time()
@@ -205,9 +242,25 @@ class STTService:
             if stop_event and stop_event.is_set(): break
             elapsed = (datetime.now() - recording_start).total_seconds()
             if elapsed >= AudioConfig.MAX_RECORDING_DURATION_SEC: break
+            current_time = time.time()
+            state_snapshot = recording_state.snapshot()
+            if (
+                not state_snapshot["has_transcript"]
+                and not speech_detected
+                and (current_time - state_snapshot["recording_started_at"]) >= AudioConfig.INITIAL_SPEECH_TIMEOUT_SEC
+            ):
+                logger.info("[STT] Initial speech timeout reached. Stopping recording.")
+                break
+            if state_snapshot["has_transcript"]:
+                last_activity_at = max(
+                    state_snapshot["last_transcript_at"] or state_snapshot["recording_started_at"],
+                    state_snapshot["last_speech_volume_at"] or state_snapshot["recording_started_at"],
+                )
+                if (current_time - last_activity_at) >= AudioConfig.TRANSCRIPT_IDLE_TIMEOUT_SEC:
+                    logger.info("[STT] Transcript idle timeout reached. Stopping recording.")
+                    break
             
             # Smart Early Disconnect Detection (Check every 2 seconds)
-            current_time = time.time()
             if current_time - last_check_time >= 2.0:
                 last_check_time = current_time
                 try:
@@ -244,6 +297,7 @@ class STTService:
                     logger.info(f"[STT] Current audio volume: {volume:.5f} (Threshold: {AudioConfig.VOLUME_THRESHOLD})")
                 
                 if volume > AudioConfig.VOLUME_THRESHOLD:
+                    recording_state.mark_speech_volume()
                     silence_start_time = None
                     if not speech_detected:
                         if speech_start_time is None: speech_start_time = time.time()

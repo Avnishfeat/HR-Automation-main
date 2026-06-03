@@ -1,7 +1,7 @@
 # app/infrastructure/browser/meet_session_manager.py
 import logging
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Dict, Optional, Any
 
@@ -172,7 +172,7 @@ class MeetSessionManager:
                     if consecutive_joins >= VideoConfig.REQUIRED_STABLE_CHECKS:
                         logger.info(f"Session {session_id}: Candidate joined successfully!")
                         session['status'] = SessionStatus.CANDIDATE_JOINED
-                        session['candidate_joined_at'] = datetime.utcnow().isoformat()
+                        session['candidate_joined_at'] = datetime.now(timezone.utc).isoformat()
                         return True
                 else:
                     consecutive_joins = 0

@@ -45,7 +45,25 @@ class InterviewService:
         return self.candidate_names.get(session_id, "Candidate")
 
     def finalize_interview_session(self, session_id: str) -> str:
-        return self.transcript_manager.save_final_transcript(session_id)
+        # 1. Get raw transcript
+        raw_transcript = self.transcript_manager.save_final_transcript(session_id)
+        
+        # 2. Batch correct it
+        try:
+            corrected_transcript = self.gemini_service.correct_transcript(session_id, raw_transcript)
+        except Exception as e:
+            logger.error(f"Batch transcript correction failed: {e}")
+            corrected_transcript = raw_transcript
+            
+        # 3. Overwrite the file with the corrected transcript if it changed
+        if corrected_transcript and corrected_transcript != raw_transcript:
+            output_dir = Path("data") / session_id
+            output_dir.mkdir(parents=True, exist_ok=True)
+            with open(output_dir / "transcript.txt", "w", encoding="utf-8") as f:
+                f.write(corrected_transcript)
+            return corrected_transcript
+            
+        return raw_transcript
 
     def cleanup_session_state(self, session_id: str):
         self.candidate_names.pop(session_id, None)

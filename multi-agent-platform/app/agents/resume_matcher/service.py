@@ -48,7 +48,11 @@ Do NOT include any markdown blocks (like ```json), conversational text, or expla
   "confidence_score": 0.85,
   "skills": ["Python", "AWS", "Machine Learning"],
   "experience": "5 years of experience in software development and 2 years in machine learning.",
-  "mismatch_reasons": [
+  "strengths": [
+    "Strong background in Machine Learning.",
+    "5 years of software development experience."
+  ],
+  "weaknesses": [
     "Candidate lacks 3 years of experience in Python as required.",
     "No mention of cloud certification (AWS/Azure) in the resume."
   ]
@@ -56,11 +60,11 @@ Do NOT include any markdown blocks (like ```json), conversational text, or expla
 """
         generated_text = await llm_service.generate_text(prompt)
         parsed_json = _parse_llm_output_to_json(generated_text)
-        
+
         # Basic validation
-        if "confidence_score" not in parsed_json or "mismatch_reasons" not in parsed_json:
+        if "confidence_score" not in parsed_json or "strengths" not in parsed_json or "weaknesses" not in parsed_json:
             raise ValueError("LLM response missing required fields.")
-            
+
         return parsed_json
     except HTTPException as e:
         raise e

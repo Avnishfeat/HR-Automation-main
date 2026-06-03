@@ -42,7 +42,8 @@ async def match_resume_to_jd(
             confidence_score=float(match_result.get("confidence_score", 0.0)),
             skills=match_result.get("skills", []),
             experience=match_result.get("experience"),
-            mismatch_reasons=match_result.get("mismatch_reasons", [])
+            strengths=match_result.get("strengths", []),
+            weaknesses=match_result.get("weaknesses", [])
         )
     except HTTPException as e:
         raise e

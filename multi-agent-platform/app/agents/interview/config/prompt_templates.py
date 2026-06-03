@@ -154,7 +154,7 @@ Analyze the interview transcript and performance. Provide the output EXACTLY as 
     "role": "{job_role}"
   }},
   "status": {{
-    "completed": {"false" if ended_early else "true"},
+    "completed": true,
     "ended_early": {str(ended_early).lower()},
     "duration_sec": {duration_sec}
   }},

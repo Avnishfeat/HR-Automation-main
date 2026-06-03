@@ -12,8 +12,13 @@ class VideoCapture:
     
     async def _execute_js_safely(self, script: str, error_msg: str = "JS execution failed"):
         try:
+            if self.page.is_closed():
+                return None
             return await self.page.evaluate(script)
         except Exception as e:
+            err_msg = str(e).lower()
+            if "closed" in err_msg or "target" in err_msg or "disconnect" in err_msg:
+                return None
             logger.error(f"{error_msg}: {e}")
             return None
     
@@ -100,7 +105,7 @@ class VideoCapture:
     
     async def capture_screenshot(self) -> Optional[bytes]:
         try:
-            if not self.page:
+            if not self.page or self.page.is_closed():
                 return None
                 
             logger.debug("Attempting screenshot capture (fallback)...")
@@ -114,5 +119,8 @@ class VideoCapture:
                 return None
                 
         except Exception as e:
+            err_msg = str(e).lower()
+            if "closed" in err_msg or "target" in err_msg or "disconnect" in err_msg:
+                return None
             logger.error(f"Screenshot capture failed: {e}", exc_info=True)
             return None

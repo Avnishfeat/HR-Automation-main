@@ -9,4 +9,5 @@ class ResumeMatchResponse(BaseModel):
     confidence_score: float = Field(..., description="A score between 0.0 and 1.0 representing the match confidence.")
     skills: List[str] = Field(default_factory=list, description="Skills extracted from the resume.")
     experience: Optional[str] = Field(None, description="A summary of the candidate's relevant experience.")
-    mismatch_reasons: List[str] = Field(..., description="A list of reasons why the resume might not fully match the JD.")
+    strengths: List[str] = Field(..., description="A list of the candidate's strengths relative to the JD.")
+    weaknesses: List[str] = Field(..., description="A list of the candidate's weaknesses relative to the JD.")

@@ -9,6 +9,10 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
+# Suppress TensorFlow and MediaPipe C++ logging (must be set before imports)
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['ABSL_LOGGING_MIN_INFO_LEVEL'] = '3'
+
 load_dotenv()
 
 # Force PulseAudio/PipeWire routing for sounddevice (used by the python bot)

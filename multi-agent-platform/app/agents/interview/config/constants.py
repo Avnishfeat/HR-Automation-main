@@ -14,9 +14,11 @@ class AudioConfig:
     RECORDING_DEVICE_NAME: Final[str] = os.getenv("RECORDING_DEVICE_NAME", "BotMic.monitor" if os.name != 'nt' else "CABLE Output")
     
     # Audio Processing
-    MIN_SPEECH_DURATION_SEC: Final[float] = 0.6  # Increased to avoid acoustic echo blips triggering it
-    VOLUME_THRESHOLD: Final[float] = 0.002         # Minimum volume to detect speech
+    MIN_SPEECH_DURATION_SEC: Final[float] = 0.2  # Decreased to easily latch speech detection on short words
+    VOLUME_THRESHOLD: Final[float] = 0.016         # Minimum volume to detect speech
     MAX_RECORDING_DURATION_SEC: Final[int] = 120  # Hard timeout for recording
+    INITIAL_SPEECH_TIMEOUT_SEC: Final[float] = 12.0  # Stop waiting if candidate never starts
+    TRANSCRIPT_IDLE_TIMEOUT_SEC: Final[float] = 1.8  # Stop after transcript/audio goes quiet
     
     # Simple fixed silence detection
     SILENCE_THRESHOLD_SEC: Final[float] = 1.5     # Increased to allow natural pauses
@@ -133,6 +135,8 @@ class StaticMessages:
     # Message templates
     NO_RESPONSE: Final[str] = "Sorry, I didn't catch that. I'll repeat the question."
     EXIT_REDIRECT: Final[str] = "We still have a few more questions to cover. I'll repeat the last question for you."
+    CACHE_KEY_EXIT_POLITE_CLOSE: Final[str] = "exit_polite_close"
+    EXIT_POLITE_CLOSE: Final[str] = "Thank you for letting me know. I'll end the interview here, and the recruiting team can follow up about next steps."
     INTRO_REPROMPT: Final[str] = "Sorry, I didn't get that. Could you please introduce yourself?"
     RESUME_GREETING = "Welcome back. I paused the interview while you were away. Let's continue."
     CACHE_KEY_RESUME = "resume_greeting"
