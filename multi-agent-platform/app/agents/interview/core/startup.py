@@ -29,29 +29,44 @@ def setup_linux_audio():
     import sys
     import subprocess
     import os
+    import time
     if not sys.platform.startswith('linux'):
         return
 
-    try:
-        # Check if sinks already exist
-        sinks = subprocess.check_output(['pactl', 'list', 'sinks', 'short'], text=True)
-        
-        if 'BotSpeaker' not in sinks:
-            logger.info("Creating virtual sink: BotSpeaker")
-            subprocess.run(['pactl', 'load-module', 'module-null-sink', 'sink_name=BotSpeaker', 'sink_properties=device.description=BotSpeaker'], check=True)
-        
-        if 'BotMic' not in sinks:
-            logger.info("Creating virtual sink: BotMic")
-            subprocess.run(['pactl', 'load-module', 'module-null-sink', 'sink_name=BotMic', 'sink_properties=device.description=BotMic'], check=True)
+    # Ensure XDG_RUNTIME_DIR is set for background processes
+    if "XDG_RUNTIME_DIR" not in os.environ:
+        uid = os.getuid()
+        runtime_dir = f"/run/user/{uid}"
+        if os.path.exists(runtime_dir):
+            os.environ["XDG_RUNTIME_DIR"] = runtime_dir
+            logger.info(f"Set fallback XDG_RUNTIME_DIR to {runtime_dir}")
+
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            # Check if sinks already exist
+            sinks = subprocess.check_output(['pactl', 'list', 'sinks', 'short'], text=True, stderr=subprocess.DEVNULL)
             
-        # Set environment variables for the current process (Bot)
-        # This tells sounddevice (via PortAudio pulse backend) which sink/source to use as 'default'
-        os.environ["PULSE_SINK"] = "BotSpeaker"
-        os.environ["PULSE_SOURCE"] = "BotMic.monitor"
-        
-        logger.info(" [Linux Audio] Virtual sinks configured and environment routed")
-    except Exception as e:
-        logger.warning(f" [Linux Audio] Failed to auto-configure virtual sinks: {e}. Ensure pulseaudio-utils is installed.")
+            if 'BotSpeaker' not in sinks:
+                logger.info("Creating virtual sink: BotSpeaker")
+                subprocess.run(['pactl', 'load-module', 'module-null-sink', 'sink_name=BotSpeaker', 'sink_properties=device.description=BotSpeaker'], check=True)
+            
+            if 'BotMic' not in sinks:
+                logger.info("Creating virtual sink: BotMic")
+                subprocess.run(['pactl', 'load-module', 'module-null-sink', 'sink_name=BotMic', 'sink_properties=device.description=BotMic'], check=True)
+                
+            # Set environment variables for the current process (Bot)
+            os.environ["PULSE_SINK"] = "BotSpeaker"
+            os.environ["PULSE_SOURCE"] = "BotMic.monitor"
+            
+            logger.info(" [Linux Audio] Virtual sinks configured and environment routed")
+            return # Success
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.warning(f" [Linux Audio] Audio server not ready (attempt {attempt+1}/{max_retries}). Retrying in 2s...")
+                time.sleep(2)
+            else:
+                logger.error(f" [Linux Audio] Failed to auto-configure virtual sinks after {max_retries} attempts: {e}. Ensure pulseaudio-utils is installed.")
 
 
 class ServiceContainer:
