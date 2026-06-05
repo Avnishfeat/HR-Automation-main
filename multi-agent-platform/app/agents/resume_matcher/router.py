@@ -10,6 +10,8 @@ from app.core.dependencies import get_llm_service
 router = APIRouter()
 logger = logging.getLogger("resume_matcher")
 
+import io
+
 @router.post("/match", response_model=ResumeMatchResponse, summary="Compare JD and Resume")
 async def match_resume_to_jd(
     job_description: str = Form(..., description="The full text or JSON of the Job Description"),
@@ -26,13 +28,22 @@ async def match_resume_to_jd(
         elif filename.endswith(".txt"):
             file_format = "txt"
         
-        # Read the file content
-        resume_text = parse_resume(resume.file, file_format=file_format)
+        # Read the file bytes first so we can reuse them if we need to upload
+        resume_bytes = await resume.read()
         
-        if not resume_text:
-            raise HTTPException(status_code=400, detail="Could not extract text from the uploaded resume file. Ensure it is a valid PDF, DOCX, or TXT.")
+        # Attempt local text extraction
+        resume_text = parse_resume(io.BytesIO(resume_bytes), file_format=file_format)
+        
+        resume_file_obj = None
+        if not resume_text or len(resume_text.strip()) < 50:
+            # Fallback to Gemini API if it's a PDF and local extraction failed (likely scanned)
+            if file_format == "pdf":
+                logger.info(f"Local PDF extraction failed for {filename}. Falling back to Gemini OCR.")
+                resume_file_obj = await llm_service.upload_file(resume_bytes, display_name=filename)
+            else:
+                raise HTTPException(status_code=400, detail="Could not extract text from the uploaded resume file. Ensure it is a valid PDF, DOCX, or TXT.")
 
-        match_result = await compare_jd_and_resume(job_description, resume_text, llm_service)
+        match_result = await compare_jd_and_resume(job_description, resume_text or "", llm_service, resume_file_obj=resume_file_obj)
         
         return ResumeMatchResponse(
             candidate_name=match_result.get("candidate_name"),

@@ -23,8 +23,10 @@ def _parse_llm_output_to_json(llm_output: str) -> Dict[str, Any]:
             detail="The model returned an invalid format. Could not parse the match results.",
         )
 
-async def compare_jd_and_resume(jd_text: str, resume_text: str, llm_service: LLMService) -> Dict[str, Any]:
+async def compare_jd_and_resume(jd_text: str, resume_text: str, llm_service: LLMService, resume_file_obj: Any = None) -> Dict[str, Any]:
     try:
+        resume_instruction = f"**Resume Text:**\n{resume_text}" if resume_text else "**Resume Document:**\n(Please read the attached resume file.)"
+        
         prompt = f"""
 You are an expert HR recruitment assistant. Your task is to compare a Job Description (JD) and a Candidate's Resume.
 You will evaluate how well the candidate's skills and experience match the job requirements, and also extract key candidate details.
@@ -32,8 +34,7 @@ You will evaluate how well the candidate's skills and experience match the job r
 **Job Description:**
 {jd_text}
 
-**Resume:**
-{resume_text}
+{resume_instruction}
 
 Provide your evaluation in strict JSON format matching the structure below.
 Extract the candidate's name, email, contact number, social links, skills, and a brief experience summary directly from the resume.
@@ -58,7 +59,8 @@ Do NOT include any markdown blocks (like ```json), conversational text, or expla
   ]
 }}
 """
-        generated_text = await llm_service.generate_text(prompt)
+        files_to_pass = [resume_file_obj] if resume_file_obj else None
+        generated_text = await llm_service.generate_text(prompt, files=files_to_pass)
         parsed_json = _parse_llm_output_to_json(generated_text)
 
         # Basic validation
