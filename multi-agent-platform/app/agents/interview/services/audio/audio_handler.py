@@ -10,6 +10,7 @@ import numpy as np
 import queue
 import threading
 import soundfile as sf
+import librosa
 import time
 from pathlib import Path
 from typing import Union, Optional, Callable, Iterator
@@ -119,15 +120,18 @@ class AudioHandler:
                     audio_data = linear_audio_int16.astype(np.float32) / 32768.0
                     
                     if len(audio_data) > 0:
+                        # Resample stream chunk if needed
+                        if self.target_samplerate != 24000:
+                            audio_data = librosa.resample(y=audio_data, orig_sr=24000, target_sr=self.target_samplerate)
                         audio_queue.put(audio_data)
             except Exception as e:
                 logger.error(f"Audio feeder error: {e}", exc_info=True)
             finally:
                 audio_queue.put(None)
                 
-        # Use native 24kHz and let PipeWire/OS handle the resampling, preventing crackles
+        # Use target sample rate to avoid Windows Audio Engine rejection
         # Increase prebuffer to 20 to handle tiny network chunks from Google TTS
-        return self._execute_playback(feeder_func, stop_event, samplerate=24000, prebuffer_chunks=20)
+        return self._execute_playback(feeder_func, stop_event, samplerate=self.target_samplerate, prebuffer_chunks=20)
 
     def play_wav_file(
         self,
@@ -155,6 +159,12 @@ class AudioHandler:
         # Ensure mono
         if len(data.shape) > 1:
             data = data.mean(axis=1)
+
+        # Resample if needed to match virtual audio cable capabilities
+        if fs != self.target_samplerate:
+            logger.info(f"Resampling audio from {fs}Hz to device native {self.target_samplerate}Hz")
+            data = librosa.resample(y=data, orig_sr=fs, target_sr=self.target_samplerate)
+            fs = self.target_samplerate
 
         def feeder_func(audio_queue: queue.Queue, finished: threading.Event):
             """Feeds audio file chunks into queue."""
