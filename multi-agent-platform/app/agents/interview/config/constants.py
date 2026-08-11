@@ -2,7 +2,6 @@
 from typing import Final
 
 import os
-from typing import Final
 
 class AudioConfig:
     # Sample Rates
@@ -58,10 +57,18 @@ class ServiceConfig:
     GEMINI_TEMPERATURE: Final[float] = 0.0
     GEMINI_TOP_K: Final[int] = 1
     GEMINI_MODEL: Final[str] = "gemini-2.5-flash"
+    GEMINI_TTS_MODEL: Final[str] = os.getenv(
+        "GEMINI_TTS_MODEL", "gemini-3.1-flash-tts-preview"
+    )
     
     # TTS Configuration
     TTS_VOICE_LANGUAGE: Final[str] = "en-IN"
-    TTS_VOICE_NAME: Final[str] = "en-IN-Chirp3-HD-Alnilam"
+    # Gemini-TTS prebuilt voice. `en-IN` is supported by Gemini 3.1 Flash TTS.
+    TTS_VOICE_NAME: Final[str] = os.getenv("GEMINI_TTS_VOICE", "Kore")
+    # JSON object of text-to-pronunciation overrides applied before synthesis.
+    TTS_PRONUNCIATION_OVERRIDES_JSON: Final[str] = os.getenv(
+        "TTS_PRONUNCIATION_OVERRIDES_JSON", ""
+    )
     TTS_MULAW_ENCODING: Final[str] = "MULAW"
     TTS_LINEAR16_ENCODING: Final[str] = "LINEAR16"
     
@@ -111,6 +118,7 @@ class SessionStatus:
     ERROR_ANALYSIS_EMPTY: Final[str] = "error_analysis_empty"
     ERROR_ANALYSIS_FAILED: Final[str] = "error_analysis_failed"
     ERROR_FATAL_TASK: Final[str] = "error_fatal_task"
+    TERMINATED_LIVENESS_FAIL: Final[str] = "terminated_liveness_fail"
     
     ABORTED_MULTIPLE_PARTICIPANTS: Final[str] = "aborted_multiple_participants"
     ABORTED_MULTIPLE_PARTICIPANTS_TIMEOUT: Final[str] = "aborted_multiple_participants_timeout"

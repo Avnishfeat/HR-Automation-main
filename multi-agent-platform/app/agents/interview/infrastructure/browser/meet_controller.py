@@ -8,6 +8,10 @@ from typing import Optional, Tuple, List
 from playwright.async_api import async_playwright, BrowserContext, Page, TimeoutError as PlaywrightTimeoutError
 
 from app.agents.interview.config.constants import BrowserConfig, InterviewTiming
+from app.agents.interview.services.audio.linux_audio import (
+    configure_chromium_virtual_source,
+    setup_linux_audio,
+)
 from .actions.chat_actions import ChatActions
 from .actions.media_actions import MediaActions
 from .actions.video_capture import VideoCapture
@@ -43,6 +47,13 @@ class MeetController:
     async def setup_driver(self) -> bool:
         """Setup Playwright browser with appropriate options asynchronously"""
         try:
+            if self.use_vb_audio and os.name != 'nt':
+                # The audio server may have restarted since the API process booted.
+                # Recreate the sinks immediately before Chromium opens.
+                if not setup_linux_audio(max_retries=3, retry_delay_seconds=1):
+                    logger.error("Cannot start a real-audio Meet session: Linux audio server is unavailable")
+                    return False
+
             self.playwright_mgr = async_playwright()
             self.playwright = await self.playwright_mgr.start()
             
@@ -74,26 +85,26 @@ class MeetController:
             env = os.environ.copy()
             if self.use_vb_audio and os.name != 'nt':
                 # Chromium actively hides .monitor sources, so we must proxy it through a virtual source
-                os.system("for id in $(pactl list modules short | grep module-virtual-source | awk '{print $1}'); do pactl unload-module $id; done || true")
-                os.system("pactl load-module module-virtual-source source_name=BotSpeaker_Virtual master=BotSpeaker.monitor || true")
-                os.system("pactl set-default-source output.BotSpeaker_Virtual || true")
-                os.system("pactl set-default-sink BotMic || true")
+                chromium_source = configure_chromium_virtual_source()
+                if not chromium_source:
+                    logger.error("Cannot start a real-audio Meet session: virtual Chromium source setup failed")
+                    return False
                 env["PULSE_SINK"] = "BotMic"
-                env["PULSE_SOURCE"] = "output.BotSpeaker_Virtual"
-                logger.info("Set PULSE_SINK=BotMic and PULSE_SOURCE=output.BotSpeaker_Virtual for Chromium")
+                env["PULSE_SOURCE"] = chromium_source
+                logger.info("Set PULSE_SINK=BotMic and PULSE_SOURCE=%s for Chromium", chromium_source)
 
             if self.user_data_dir:
                 profile_path = os.path.abspath(self.user_data_dir)
                 os.makedirs(profile_path, exist_ok=True)
                 
-                # FIX: Remove stale SingletonLock if previous run crashed
+                # A lock means another Chromium process may still own this
+                # profile.  Removing it can corrupt a live profile, so fail
+                # safely and let process/session cleanup release it.
                 lock_file = os.path.join(profile_path, "SingletonLock")
                 if os.path.lexists(lock_file):
-                    try:
-                        os.remove(lock_file)
-                        logger.info(f"Removed stale SingletonLock at {lock_file}")
-                    except OSError as e:
-                        logger.warning(f"Could not remove SingletonLock: {e}")
+                    logger.error("Chromium profile is locked: %s", lock_file)
+                    await self.cleanup()
+                    return False
                 
                 logger.info(f"Using persistent Chromium profile: {profile_path}")
                 self.browser = await self.playwright.chromium.launch_persistent_context(
@@ -294,4 +305,3 @@ class MeetController:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.cleanup()
         return False
-

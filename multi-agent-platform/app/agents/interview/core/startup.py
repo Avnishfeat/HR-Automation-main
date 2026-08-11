@@ -16,58 +16,18 @@ from app.agents.interview.infrastructure.browser.meet_session_manager import Mee
 from app.agents.interview.orchestrator.meet_interview_orchestrator import MeetInterviewOrchestrator
 from app.agents.interview.services.audio.stt_service import STTService
 from app.agents.interview.services.audio.tts_service import TTSService
+from app.agents.interview.services.audio.linux_audio import setup_linux_audio
 from app.core.exceptions import ServiceInitializationError
 from app.agents.interview.core.error_handlers import register_error_handlers
 from app.agents.interview.core.middleware import register_middleware
-from app.agents.interview.core.limiter import limiter, init_concurrency_limiter
+from app.agents.interview.core.limiter import (
+    MAX_CONCURRENT_SESSIONS,
+    limiter,
+    init_concurrency_limiter,
+)
 from app.agents.interview.core.cleanup import start_cleanup_task, stop_cleanup_task
 
 logger = logging.getLogger(__name__)
-
-def setup_linux_audio():
-    """Configures virtual audio sinks on Linux (PulseAudio/PipeWire)"""
-    import sys
-    import subprocess
-    import os
-    import time
-    if not sys.platform.startswith('linux'):
-        return
-
-    # Ensure XDG_RUNTIME_DIR is set for background processes
-    if "XDG_RUNTIME_DIR" not in os.environ:
-        uid = os.getuid()
-        runtime_dir = f"/run/user/{uid}"
-        if os.path.exists(runtime_dir):
-            os.environ["XDG_RUNTIME_DIR"] = runtime_dir
-            logger.info(f"Set fallback XDG_RUNTIME_DIR to {runtime_dir}")
-
-    max_retries = 5
-    for attempt in range(max_retries):
-        try:
-            # Check if sinks already exist
-            sinks = subprocess.check_output(['pactl', 'list', 'sinks', 'short'], text=True, stderr=subprocess.DEVNULL)
-            
-            if 'BotSpeaker' not in sinks:
-                logger.info("Creating virtual sink: BotSpeaker")
-                subprocess.run(['pactl', 'load-module', 'module-null-sink', 'sink_name=BotSpeaker', 'sink_properties=device.description=BotSpeaker'], check=True)
-            
-            if 'BotMic' not in sinks:
-                logger.info("Creating virtual sink: BotMic")
-                subprocess.run(['pactl', 'load-module', 'module-null-sink', 'sink_name=BotMic', 'sink_properties=device.description=BotMic'], check=True)
-                
-            # Set environment variables for the current process (Bot)
-            os.environ["PULSE_SINK"] = "BotSpeaker"
-            os.environ["PULSE_SOURCE"] = "BotMic.monitor"
-            
-            logger.info(" [Linux Audio] Virtual sinks configured and environment routed")
-            return # Success
-        except Exception as e:
-            if attempt < max_retries - 1:
-                logger.warning(f" [Linux Audio] Audio server not ready (attempt {attempt+1}/{max_retries}). Retrying in 2s...")
-                time.sleep(2)
-            else:
-                logger.error(f" [Linux Audio] Failed to auto-configure virtual sinks after {max_retries} attempts: {e}. Ensure pulseaudio-utils is installed.")
-
 
 class ServiceContainer:
     """Container for all application services"""
@@ -92,7 +52,7 @@ def initialize_services():
         logger.info(" urllib3 connection pool configured (maxsize=100)")
         
         # Initialize concurrency limiter
-        init_concurrency_limiter(max_sessions=5)
+        init_concurrency_limiter(max_sessions=MAX_CONCURRENT_SESSIONS)
         
         # 2. Analysis Services
         try:

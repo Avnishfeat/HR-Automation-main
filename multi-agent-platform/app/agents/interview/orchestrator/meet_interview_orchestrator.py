@@ -31,6 +31,7 @@ from app.agents.interview.config.constants import (
     StaticMessages, ParticipantThresholds
 )
 from app.agents.interview.utils.audio_file_utils import get_user_audio_path_for_stt
+from app.core.exceptions import ExternalServiceError
 
 logger = logging.getLogger(__name__)
 
@@ -90,9 +91,6 @@ class MeetInterviewOrchestrator:
         self.liveness_svc = LivenessChallengeService()
         self.video_analyzer = VideoIntegrityAnalyzer()
         
-        # Participant monitoring
-        self.participant_monitor: Optional[ParticipantMonitor] = None
-        
         # NEW: Extracted handlers for cleaner code
         self.malpractice_handler = MalpracticeHandler(
             session_manager, interview_service, audio_handler
@@ -113,6 +111,7 @@ class MeetInterviewOrchestrator:
         duration_seconds = interview_duration_minutes * 60
         transcript_log = []
         session = None
+        terminal_status = SessionStatus.COMPLETED
         
         try:
             # Get session with ThreadSafe Proxy
@@ -128,8 +127,8 @@ class MeetInterviewOrchestrator:
                     self.state_mgr.advance_phase(state, InterviewPhase.GREETING)
                 
                 if not await self._run_greeting(session, state):
-                    # --- FIX: Return the build response instead of None ---
-                    return self._build_final_response(session_id, state, transcript_log) 
+                    terminal_status = SessionStatus.STOP_REQUESTED if session.stop_event.is_set() else SessionStatus.ERROR_FATAL_TASK
+                    return self._build_final_response(session_id, state, transcript_log, terminal_status)
 
                 # Only now do we advance
                 self.state_mgr.advance_phase(state, InterviewPhase.INTRODUCTION)
@@ -143,6 +142,7 @@ class MeetInterviewOrchestrator:
             if state.phase == InterviewPhase.INTERVIEW_LOOP:
                 result = await self._run_interview_loop(session, state, duration_seconds)
                 transcript_log = result.get('transcript_log', [])
+                terminal_status = result.get("status", terminal_status)
                 
                 # Only advance to CONCLUSION if NOT stopped forcibly
                 if not session.stop_event.is_set():
@@ -155,20 +155,21 @@ class MeetInterviewOrchestrator:
 
         except Exception as e:
             logger.error(f"Fatal error in orchestration: {e}", exc_info=True)
+            terminal_status = SessionStatus.ERROR_FATAL_TASK
             if session and session.stop_event: session.stop_event.set()
         
         finally:
             await self._run_cleanup(session, state)
             self.state_mgr.advance_phase(state, InterviewPhase.COMPLETED)
         
-        return self._build_final_response(session_id, state, transcript_log)
+        return self._build_final_response(session_id, state, transcript_log, terminal_status)
 
     # =========================================================================
     # PARTICIPANT MONITORING
     # =========================================================================
     def _start_participant_monitoring(self, session):
         try:
-            self.participant_monitor = ParticipantMonitor(
+            monitor = ParticipantMonitor(
                 session_id=session.session_id,
                 meet_controller=session.meet, 
                 stop_event=session.stop_event,
@@ -177,7 +178,11 @@ class MeetInterviewOrchestrator:
                     session, count, v_type, names
                 )
             )
-            self.participant_monitor.start_monitoring()
+            session_data = self.session_mgr.get_session(session.session_id)
+            if not session_data:
+                raise ValueError(f"Session {session.session_id} disappeared before monitoring started")
+            session_data["participant_monitor"] = monitor
+            monitor.start_monitoring()
             logger.info("Participant monitoring enabled (Smart Detection)")
         except Exception as e:
             logger.error(f"Failed to start participant monitor: {e}")
@@ -193,7 +198,7 @@ class MeetInterviewOrchestrator:
         
         while True:
             if session.stop_event.is_set():
-                if self.malpractice_handler.processing.is_set():
+                if self.malpractice_handler.is_processing(session.session_id):
                     logger.info("Greeting aborted due to malpractice")
                 return False
 
@@ -206,7 +211,7 @@ class MeetInterviewOrchestrator:
             )
             
             if not success:
-                if session.stop_event.is_set() and self.malpractice_handler.processing.is_set():
+                if session.stop_event.is_set() and self.malpractice_handler.is_processing(session.session_id):
                     logger.info("Greeting interrupted by malpractice detection")
                     return False
                 
@@ -259,6 +264,7 @@ class MeetInterviewOrchestrator:
         logger.info(f"--- Phase: {state.phase} ---")
         transcript_log = []
         has_done_spot_check = False
+        terminal_status = SessionStatus.COMPLETED
         
         # Randomize liveness check turn (between turn 2 and 5)
         liveness_check_turn = random.randint(2, 5)
@@ -266,11 +272,25 @@ class MeetInterviewOrchestrator:
         
         while True:
             self._heartbeat_session(session.session_id)
-            if await self._should_terminate(session, state, duration_seconds): 
+            if await self._should_terminate(session, state, duration_seconds):
+                session_data = self.session_mgr.get_session(session.session_id) or {}
+                session_status = session_data.get("status")
+                if session_status in {
+                    SessionStatus.STOP_REQUESTED,
+                    SessionStatus.ERROR_CANDIDATE_LEFT,
+                    SessionStatus.ERROR_MULTIPLE_PARTICIPANTS,
+                }:
+                    terminal_status = session_status
+                else:
+                    terminal_status = (
+                        SessionStatus.STOP_REQUESTED if session.stop_event.is_set()
+                        else SessionStatus.TIME_LIMIT_REACHED
+                    )
                 break
             
             if not await self._wait_for_rejoin(session):
                 self.malpractice_handler.set_termination_reason(session.session_id, "candidate_disconnected")
+                terminal_status = SessionStatus.ERROR_CANDIDATE_LEFT
                 break
 
             should_trigger_spot_check = False
@@ -293,14 +313,14 @@ class MeetInterviewOrchestrator:
                 if not success:
                     logger.warning("Spot check failed. Terminating session.")
                     self.malpractice_handler.set_termination_reason(session.session_id, "mid_interview_liveness_failed")
-                    return {'status': 'terminated_liveness_fail', 'transcript_log': transcript_log}
+                    return {'status': SessionStatus.TERMINATED_LIVENESS_FAIL, 'transcript_log': transcript_log}
                 
                 has_done_spot_check = True
                 state._last_spot_check_turn = state.turn_count
                 session.malpractice_flags.clear() 
 
             # Run integrity check in background (don't block conversation)
-            asyncio.create_task(self._check_integrity_async(session))
+            self._schedule_integrity_check(session)
 
             # PRIORITY 1: Conversation workflow (record → STT → Gemini → TTS)
 
@@ -319,7 +339,7 @@ class MeetInterviewOrchestrator:
             if session.stop_event.is_set(): break 
 
             # Run integrity check in background (don't block response processing)
-            asyncio.create_task(self._check_integrity_async(session))
+            self._schedule_integrity_check(session)
 
             result = await self.response_handler.handle_response(
                 session, state, response, self._record_response
@@ -341,7 +361,7 @@ class MeetInterviewOrchestrator:
                     "turn": result.final_response.turn_count
                 })
 
-        return {'transcript_log': transcript_log}
+        return {'status': terminal_status, 'transcript_log': transcript_log}
 
     # =========================================================================
     # HELPER METHODS
@@ -468,6 +488,21 @@ class MeetInterviewOrchestrator:
             session.session_id, turn_count, is_follow_up,
             on_interim_transcript=on_interim
         )
+        if transcript == "[Error]":
+            if session.stop_event.is_set():
+                # A participant departure can interrupt a retry recording. It
+                # is not candidate speech and must not enter the transcript.
+                transcript = "[No response]"
+            else:
+                raise ExternalServiceError(
+                    "stt", "recording", "unexpected recording error",
+                    details={"session_id": session.session_id}, retryable=False,
+                )
+        if transcript in {"[STT unavailable]", "[STT failed]", "[Speech service unavailable]"}:
+            raise ExternalServiceError(
+                "stt", "recording", transcript,
+                details={"session_id": session.session_id}, retryable=False,
+            )
         end_time = datetime.now()
         await session.meet.disable_microphone()
         
@@ -533,6 +568,19 @@ class MeetInterviewOrchestrator:
             await self.integrity_handler.check_video_integrity(session)
         except Exception as e:
             logger.debug(f"Background integrity check failed: {e}")
+
+    def _schedule_integrity_check(self, session: InterviewSession) -> None:
+        """Keep at most one low-priority integrity task per interview."""
+        session_data = self.session_mgr.get_session(session.session_id)
+        if not session_data:
+            return
+        existing_task = session_data.get("integrity_task")
+        if existing_task and not existing_task.done():
+            return
+        session_data["integrity_task"] = asyncio.create_task(
+            self._check_integrity_async(session),
+            name=f"IntegrityCheck-{session.session_id[:8]}",
+        )
 
     async def _should_terminate(self, session, state, duration):
         if session.stop_event.is_set(): return True
@@ -615,13 +663,25 @@ class MeetInterviewOrchestrator:
         await asyncio.sleep(2.0)
 
     async def _run_cleanup(self, session, state):
-        if self.malpractice_handler.processing.is_set():
+        if session and self.malpractice_handler.is_processing(session.session_id):
             for _ in range(20):
-                if not self.malpractice_handler.processing.is_set(): break
+                if not self.malpractice_handler.is_processing(session.session_id):
+                    break
                 await asyncio.sleep(1)
-        if self.participant_monitor:
-            self.participant_monitor.stop_monitoring()
-            self.participant_monitor = None
+        if not session:
+            return
+        session_data = self.session_mgr.get_session(session.session_id) or {}
+        monitor = session_data.get("participant_monitor")
+        if monitor:
+            monitor.stop_monitoring()
+            await monitor.wait_stopped()
+        integrity_task = session_data.get("integrity_task")
+        if integrity_task and not integrity_task.done():
+            integrity_task.cancel()
+            try:
+                await integrity_task
+            except asyncio.CancelledError:
+                pass
 
     @staticmethod
     def _heartbeat_session(session_id: str) -> None:
@@ -629,13 +689,15 @@ class MeetInterviewOrchestrator:
         if concurrency_limiter:
             concurrency_limiter.heartbeat(session_id)
         
-    def _build_final_response(self, session_id, state, logs):
+    def _build_final_response(self, session_id, state, logs, status=SessionStatus.COMPLETED):
         final_response = {
-            "status": SessionStatus.COMPLETED,
+            "status": status,
             "session_id": session_id,
             "questions_asked": state.questions_asked_count,
             "final_transcript_summary": logs
         }
-        if self.participant_monitor:
-            final_response['monitoring_stats'] = self.participant_monitor.get_status()
+        session_data = self.session_mgr.get_session(session_id) or {}
+        monitor = session_data.get("participant_monitor")
+        if monitor:
+            final_response['monitoring_stats'] = monitor.get_status()
         return final_response

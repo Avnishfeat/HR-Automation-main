@@ -8,6 +8,7 @@ Provides:
 """
 
 import logging
+import os
 from typing import Optional
 from datetime import datetime, timedelta, timezone
 
@@ -31,7 +32,9 @@ RATE_LIMITS = {
 }
 
 # Maximum concurrent sessions
-MAX_CONCURRENT_SESSIONS = 5  # Adjust based on server RAM
+# The current Linux virtual-audio and Chrome-profile setup is shared across the
+# process, so more than one interview can cross-talk or corrupt browser state.
+MAX_CONCURRENT_SESSIONS = int(os.getenv("MAX_CONCURRENT_INTERVIEWS", "1"))
 
 
 # =============================================================================

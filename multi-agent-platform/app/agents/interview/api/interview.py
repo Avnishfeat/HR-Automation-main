@@ -4,12 +4,14 @@ import io
 import json
 import uuid
 from typing import Optional, List
-from pathlib import Path
 
-from fastapi import APIRouter, UploadFile, File, Form, BackgroundTasks, HTTPException, Request, Response
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request, Response
 
 from app.agents.interview.core.startup import get_services
 from app.agents.interview.core.background import start_and_conduct_interview_task
+from app.agents.interview.core.task_registry import create_interview_task
+from app.agents.interview.core.task_registry import is_task_active
+from app.agents.interview.core.local_state import get_terminal_status
 from app.core.exceptions import (
     ValidationError,
     InterviewExecutionError
@@ -25,7 +27,6 @@ router = APIRouter()
 async def start_google_meet_interview(
     request: Request,
     response: Response,
-    background_tasks: BackgroundTasks,
     meet_link: str = Form(...),
     questionnaire_json: Optional[str] = Form(None),
     audio_device: Optional[int] = Form(None),
@@ -110,8 +111,9 @@ async def start_google_meet_interview(
             session_id=session_id
         )
 
-        background_tasks.add_task(
-            start_and_conduct_interview_task,
+        create_interview_task(
+            session_id,
+            start_and_conduct_interview_task(
             session_id=session_id,
             meet_link=meet_link,
             webhook_url=webhook_url,
@@ -122,6 +124,7 @@ async def start_google_meet_interview(
             resume_content=resume_content,
             candidate_email=candidate_email,
             buss_id=buss_id
+            ),
         )
         
     except Exception as e:
@@ -139,12 +142,12 @@ def get_interview_status(session_id: str):
     Check if a session is still active or completed.
     Stateless check: presence of report on disk.
     """
-    report_path = Path("data") / session_id / "reports" / "final_screening_report.json"
-    if report_path.exists():
-        return {"status": "completed", "session_id": session_id}
+    terminal_status = get_terminal_status(session_id)
+    if terminal_status:
+        return terminal_status
 
     services = get_services()
-    if services.meet_session_mgr and services.meet_session_mgr.get_session(session_id):
+    if is_task_active(session_id) or (services.meet_session_mgr and services.meet_session_mgr.get_session(session_id)):
         return {"status": "active", "session_id": session_id}
     
     # Note: This is an approximation since we don't have a shared DB state

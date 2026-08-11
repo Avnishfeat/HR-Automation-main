@@ -1,0 +1,9 @@
+[Unit]
+Description=Interview Agent health monitor
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Kaivalya_Feat/HR-Automation-main/multi-agent-platform
+EnvironmentFile=-%h/Kaivalya_Feat/HR-Automation-main/multi-agent-platform/ops/interview-monitor.env
+ExecStart=%h/Kaivalya_Feat/HR-Automation-main/multi-agent-platform/ops/check-interview-health.sh

@@ -2,6 +2,19 @@
 
 This document lists the public API endpoints exposed by the Multi-Agent Platform FastAPI application.
 
+For a complete Interview Agent reference, see [Interview Agent API Reference](docs/interview-agent-api.md).
+
+For internal operational findings and remediation priorities, see the [Interview Agent Stability Audit](docs/interview-agent-stability-audit.md).
+
+For production boot ordering, health monitoring, maintenance-window recovery,
+and retention settings, see [Interview Agent Operations](docs/interview-operations.md).
+
+Interview operations are single-session by default and expose health at
+`/api/v1/interview/health` and `/api/v1/interview/health/detailed`. Completion
+webhooks are written to the local `data/webhook_outbox` before delivery and
+retried asynchronously; see the Interview Agent reference for payloads and
+retry behavior.
+
 ## Base URLs
 
 Production via nginx:
@@ -422,6 +435,8 @@ Form fields:
 - `job_description`: optional job description text
 - `video_capture_method`: optional value, defaults to `javascript`
 - `webhook_url`: optional callback URL for interview results/events
+- `candidate_email`: candidate email address
+- `buss_id`: business identifier associated with the candidate
 
 Example:
 
@@ -433,6 +448,9 @@ curl -X POST "http://122.170.2.205:7010/api/v1/interview/start-google-meet" \
   -F 'questionnaire_json=["Tell me about your SQL experience.","How do you validate dashboard accuracy?"]' \
   -F "enable_video=true" \
   -F "video_capture_method=javascript" \
+  -F "candidate_email=candidate@example.com" \
+  -F "buss_id=BUSS-123" \
+  -F "webhook_url=https://example.com/interview-webhook" \
   -F "resume=@/path/to/resume.pdf"
 ```
 
@@ -450,6 +468,76 @@ Possible errors:
 - `503`: server interview capacity reached
 - `400`: invalid resume or invalid questionnaire JSON
 - `500`: interview task scheduling failed
+
+### Interview Webhook
+
+When `webhook_url` is supplied, the platform sends a final payload when the
+interview finishes. A successful interview uses the `analysis_completed` event
+and includes the generated report as a JSON string. The payload includes
+`agent_errors`, an array of errors logged by interview-agent components during
+that session.
+
+```json
+{
+  "event": "analysis_completed",
+  "session_id": "8f2b7b5f-3f1f-49d7-8895-6a98ad3c0a55",
+  "transcript_path": "data/8f2b7b5f-3f1f-49d7-8895-6a98ad3c0a55/transcript.txt",
+  "analysis": "{...}",
+  "agent_errors": [
+    {
+      "timestamp": "2026-08-10T12:00:00+00:00",
+      "component": "app.agents.interview.services.audio.stt_service",
+      "type": "ExternalServiceError",
+      "message": "Speech service request failed"
+    }
+  ]
+}
+```
+
+For failures before a final analysis can be created (for example, bot join
+failure, candidate no-show, or a fatal task error), the final payload uses
+`interview_completed` instead:
+
+```json
+{
+  "event": "interview_completed",
+  "session_id": "8f2b7b5f-3f1f-49d7-8895-6a98ad3c0a55",
+  "status": "error_join_failed",
+  "agent_errors": [
+    {
+      "timestamp": "2026-08-10T12:00:00+00:00",
+      "component": "meet_session",
+      "type": "BotJoinError",
+      "message": "Bot join failed"
+    }
+  ]
+}
+```
+
+Each error has a UTC timestamp, component, type, and message. Messages are
+limited to 2,000 characters and stack traces are not included. In dict-based
+analysis reports, the same information is also available at
+`metadata.agent_errors` and `metadata.agent_error_count`.
+
+### Linux Audio Recovery
+
+On Linux, the application recreates the `BotSpeaker`, `BotMic`, and Chromium
+virtual source when PipeWire/PulseAudio restarts. It also checks audio setup
+immediately before a new Google Meet session starts. The background recovery
+check runs every 15 seconds by default; set
+`LINUX_AUDIO_RECOVERY_INTERVAL_SECONDS` to change the interval (minimum 5
+seconds).
+
+The PipeWire-Pulse or PulseAudio server must still run under the same Linux user
+as PM2. Verify this with `pactl info` after a VM restart.
+
+The interview TTS provider uses `gemini-3.1-flash-tts-preview` with the Gemini
+`Kore` voice and English (India) locale. See the Interview Agent API reference
+for required Google Cloud permissions, optional model/voice environment
+variables, and the TTS-only pronunciation glossary. The glossary makes common
+stack names such as `MERN` speak as words while spelling technical acronyms
+such as `API` and `SQL`; it can be extended with
+`TTS_PRONUNCIATION_OVERRIDES_JSON`.
 
 ### Get Interview Status
 

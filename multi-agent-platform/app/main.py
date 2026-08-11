@@ -2,8 +2,10 @@
 
 import os
 import subprocess
+import asyncio
 from contextlib import asynccontextmanager
 import logging
+import sys
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -23,7 +25,19 @@ if os.name != 'nt':
 from app.agents.criteria_agent.router import router as criteria_router
 from app.agents.example_agent.router import router as example_agent_router
 from app.agents.interview.api.interview import router as interview_router
-from app.agents.interview.core.startup import initialize_services as initialize_interview_services
+from app.agents.interview.api.health import router as interview_health_router
+from app.agents.interview.core.startup import (
+    get_services,
+    initialize_services as initialize_interview_services,
+)
+from app.agents.interview.core.cleanup import start_cleanup_task, stop_cleanup_task
+from app.agents.interview.core.task_registry import drain_interview_tasks
+from app.agents.interview.core.maintenance import run_local_retention_cleanup
+from app.agents.interview.services.audio.linux_audio import (
+    configure_chromium_virtual_source,
+    setup_linux_audio,
+)
+from app.utils.webhook_outbox import deliver_due_webhooks_async
 from app.agents.jd_agent.router import router as jd_router
 from app.agents.job_post_agent.router import router as job_post_agent_router
 from app.agents.question_generator.router import router as question_generator_router
@@ -36,6 +50,49 @@ from app.core.logging import setup_logging
 logger = logging.getLogger(__name__)
 
 
+async def _monitor_linux_audio() -> None:
+    """Restore virtual devices when PipeWire/Pulse restarts after API startup."""
+    try:
+        interval_seconds = max(5, int(os.getenv("LINUX_AUDIO_RECOVERY_INTERVAL_SECONDS", "15")))
+    except ValueError:
+        interval_seconds = 15
+        logger.warning("Invalid LINUX_AUDIO_RECOVERY_INTERVAL_SECONDS; using %s seconds", interval_seconds)
+
+    while True:
+        await asyncio.sleep(interval_seconds)
+        if setup_linux_audio(max_retries=1, retry_delay_seconds=0):
+            configure_chromium_virtual_source()
+
+
+async def _monitor_webhook_outbox() -> None:
+    """Deliver persisted completion notifications without blocking interviews."""
+    while True:
+        try:
+            summary = await deliver_due_webhooks_async(max_events=5)
+            if summary["delivered"] or summary["retried"] or summary["failed"]:
+                logger.info(f"Webhook outbox delivery summary: {summary}")
+        except Exception:
+            logger.exception("Webhook outbox delivery pass failed")
+        await asyncio.sleep(15)
+
+
+async def _monitor_local_retention() -> None:
+    """Prune only terminal local artifacts on a low-frequency maintenance loop."""
+    try:
+        interval_seconds = max(300, int(os.getenv("LOCAL_RETENTION_CLEANUP_INTERVAL_SECONDS", "3600")))
+    except ValueError:
+        interval_seconds = 3600
+        logger.warning("Invalid LOCAL_RETENTION_CLEANUP_INTERVAL_SECONDS; using %s seconds", interval_seconds)
+
+    while True:
+        try:
+            summary = await asyncio.to_thread(run_local_retention_cleanup)
+            logger.info(f"Local retention cleanup summary: {summary}")
+        except Exception:
+            logger.exception("Local retention cleanup failed")
+        await asyncio.sleep(interval_seconds)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
@@ -45,17 +102,52 @@ async def lifespan(app: FastAPI):
 
     try:
         initialize_interview_services()
+        await start_cleanup_task()
         logger.info("Interview services initialized")
     except Exception:
         logger.exception("Failed to initialize interview services")
         raise
 
+    audio_recovery_task = None
+    webhook_outbox_task = asyncio.create_task(_monitor_webhook_outbox(), name="webhook-outbox")
+    retention_task = asyncio.create_task(_monitor_local_retention(), name="local-retention")
+    if sys.platform.startswith("linux"):
+        audio_recovery_task = asyncio.create_task(
+            _monitor_linux_audio(), name="linux-audio-recovery"
+        )
+
     logger.info("Application started successfully")
 
-    yield
+    try:
+        yield
+    finally:
+        if audio_recovery_task:
+            audio_recovery_task.cancel()
+            try:
+                await audio_recovery_task
+            except asyncio.CancelledError:
+                pass
 
-    logger.info("Shutting down...")
-    logger.info("Application shut down successfully")
+        services = get_services()
+        if services.meet_session_mgr:
+            for session_id in list(services.meet_session_mgr.get_all_active_sessions()):
+                services.meet_session_mgr.request_session_stop(session_id)
+        await drain_interview_tasks()
+
+        webhook_outbox_task.cancel()
+        try:
+            await webhook_outbox_task
+        except asyncio.CancelledError:
+            pass
+        retention_task.cancel()
+        try:
+            await retention_task
+        except asyncio.CancelledError:
+            pass
+        await stop_cleanup_task()
+
+        logger.info("Shutting down...")
+        logger.info("Application shut down successfully")
 
 
 app = FastAPI(
@@ -80,6 +172,7 @@ app.include_router(talent_matcher_router, prefix="/api/v1/talent_matcher", tags=
 app.include_router(resume_matcher_router, prefix="/api/v1/resume_matcher", tags=["Resume Matcher Agent"])
 app.include_router(question_generator_router, prefix="/api/v1/question_generator", tags=["Question Generator Agent"])
 app.include_router(interview_router, prefix="/api/v1/interview", tags=["Interview Agent"])
+app.include_router(interview_health_router, prefix="/api/v1/interview", tags=["Interview Health"])
 
 
 @app.get("/")

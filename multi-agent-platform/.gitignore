@@ -124,6 +124,8 @@ dmypy.json
 
 captured_frames/
 data/
+# Kept explicitly for clarity: historical-session archives may contain PII.
+data/archive/
 chrome_profile/
 uploads/
 service_account.json
@@ -138,5 +140,6 @@ logs/
 pytest.ini
 new_analysis_schema.json
 scripts/
+ops/interview-monitor.env
 .codex
 ecosystem.config.js

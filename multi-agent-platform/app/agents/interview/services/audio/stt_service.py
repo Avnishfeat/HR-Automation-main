@@ -1,5 +1,6 @@
 # app/services/stt_service.py
 import logging
+import os
 import time
 import asyncio
 import sounddevice as sd
@@ -36,6 +37,11 @@ except ImportError:
 from app.agents.interview.infrastructure.browser.meet_session_manager import MeetSessionManager
 from app.agents.interview.utils.audio_file_utils import get_user_audio_path_for_stt, save_audio_file
 from app.agents.interview.config.constants import AudioConfig, ServiceConfig
+from app.agents.interview.services.audio.linux_audio import (
+    configure_chromium_virtual_source,
+    setup_linux_audio,
+)
+from app.agents.interview.core.session_error_tracker import record_session_error
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -92,7 +98,6 @@ class STTService:
 
     def _find_recording_device(self) -> Optional[int]:
         try:
-            import os
             target_name = AudioConfig.RECORDING_DEVICE_NAME.lower()
             devices = sd.query_devices()
             preferred_hostapis = ['Windows WASAPI', 'Windows DirectSound', 'MME']
@@ -121,6 +126,23 @@ class STTService:
             logger.error(f"Error finding STT audio device: {e}")
             return None
 
+    def ensure_recording_device(self) -> bool:
+        """Refresh the STT device after a Linux audio-server restart."""
+        if os.name != "nt":
+            if not setup_linux_audio(max_retries=1, retry_delay_seconds=0):
+                logger.error("[STT] PulseAudio/PipeWire is unavailable before recording")
+                return False
+            if not configure_chromium_virtual_source():
+                logger.error("[STT] Chromium virtual source is unavailable before recording")
+                return False
+
+        device = self._find_recording_device()
+        if device is None:
+            logger.error("[STT] No recording device is available")
+            return False
+        self.virtual_input = device
+        return True
+
     def _init_v1_client(self):
         if not V1_AVAILABLE: return
         try:
@@ -145,6 +167,8 @@ class STTService:
             logger.error(f"Failed to initialize Speech V2: {e}")
 
     async def _record_and_process_stt_streaming(self, session_id: str, turn_count: int, is_follow_up: bool = False, on_interim_transcript: Callable[[str], None] = None) -> Tuple[Optional[datetime], str]:
+        if not await asyncio.to_thread(self.ensure_recording_device):
+            return None, "[STT unavailable]"
         if self.api_version == "v2":
             return await asyncio.to_thread(self._process_with_v2, session_id, turn_count, is_follow_up, on_interim_transcript)
         else:
@@ -156,7 +180,7 @@ class STTService:
         try:
             session = self.session_mgr.get_session(session_id)
             if not session or (session.get('stop_interview') and session.get('stop_interview').is_set()): return None, "[Error]"
-            stop_event = session.get('stop_interview'); input_device = self.virtual_input or sd.default.device[0]
+            stop_event = session.get('stop_interview'); input_device = self.virtual_input if self.virtual_input is not None else sd.default.device[0]
             def audio_callback(indata, frames, time, status):
                 audio_queue.put((indata * 32767).astype(np.int16).tobytes())
                 recorded_chunks.append(indata.copy())
@@ -174,7 +198,9 @@ class STTService:
                             if response.results[0].alternatives:
                                 transcript_parts.append(response.results[0].alternatives[0].transcript)
                                 recording_state.mark_transcript()
-                except Exception: pass
+                except Exception as error:
+                    logger.error("[STT] Speech V1 streaming failed: %s", error, exc_info=True)
+                    record_session_error(session_id, "stt_service", str(error), type(error).__name__)
             stream = sd.InputStream(samplerate=self.samplerate, device=input_device, channels=1, callback=audio_callback, dtype='float32')
             stream.start(); recording_start = datetime.now()
             recording_state = RecordingState(recording_start=recording_start)
@@ -184,7 +210,9 @@ class STTService:
             if recorded_chunks: threading.Thread(target=self._save_recorded_audio, args=(recorded_chunks, session_id, turn_count, is_follow_up), daemon=True).start()
             final_transcript = " ".join(transcript_parts).strip()
             return recording_start, final_transcript if final_transcript else "[No response]"
-        except Exception: return None, "[Error]"
+        except Exception as error:
+            logger.error("[STT] V1 recording failed: %s", error, exc_info=True)
+            return None, "[STT failed]"
 
     def _process_with_v2(self, session_id: str, turn_count: int, is_follow_up: bool, on_interim_transcript: Callable[[str], None] = None) -> Tuple[Optional[datetime], str]:
         if not self.speech_client or not self.recognizer: return None, "[Speech service unavailable]"
@@ -192,7 +220,7 @@ class STTService:
         try:
             session = self.session_mgr.get_session(session_id)
             if not session or (session.get('stop_interview') and session.get('stop_interview').is_set()): return None, "[Error]"
-            stop_event = session.get('stop_interview'); input_device = self.virtual_input or sd.default.device[0]
+            stop_event = session.get('stop_interview'); input_device = self.virtual_input if self.virtual_input is not None else sd.default.device[0]
             def audio_callback(indata, frames, time, status):
                 audio_queue.put((indata * 32767).astype(np.int16).tobytes())
                 recorded_chunks.append(indata.copy())
@@ -219,7 +247,9 @@ class STTService:
                                     except Exception: pass
                                 if result.is_final and result.alternatives:
                                     transcript_parts.append(transcript_text)
-                except Exception: pass
+                except Exception as error:
+                    logger.error("[STT] Speech V2 streaming failed: %s", error, exc_info=True)
+                    record_session_error(session_id, "stt_service", str(error), type(error).__name__)
             stream = sd.InputStream(samplerate=self.samplerate, device=input_device, channels=1, callback=audio_callback, dtype='float32')
             stream.start(); recording_start = datetime.now()
             recording_state = RecordingState(recording_start=recording_start)
@@ -229,7 +259,9 @@ class STTService:
             if recorded_chunks: threading.Thread(target=self._save_recorded_audio, args=(recorded_chunks, session_id, turn_count, is_follow_up), daemon=True).start()
             final_transcript = " ".join(transcript_parts).strip()
             return recording_start, final_transcript if final_transcript else "[No response]"
-        except Exception: return None, "[Error]"
+        except Exception as error:
+            logger.error("[STT] V2 recording failed: %s", error, exc_info=True)
+            return None, "[STT failed]"
 
     def _monitor_recording(self, recorded_chunks, stop_event, recording_start, session_id, recording_state: Optional[RecordingState] = None):
         recording_state = recording_state or RecordingState(recording_start=recording_start)

@@ -22,14 +22,23 @@ class MeetSessionManager:
 
     def __init__(self):
         self.active_sessions: Dict[str, Dict[str, Any]] = {}
+        self.start_failures: Dict[str, str] = {}
         self.SNAPSHOT_INTERVAL = 4.0
 
     async def start_bot_session(self, session_id, meet_link, audio_device=None, enable_video=True, headless=True, video_capture_method="javascript") -> bool:
         try:
+            if self.active_sessions:
+                self.start_failures[session_id] = SessionStatus.ERROR_CAPACITY_REACHED
+                logger.error("Cannot start %s: another interview is already active", session_id)
+                return False
+
             controller = MeetController(headless=headless, audio_device_index=audio_device, user_data_dir=str(self.CHROME_PROFILE_PATH), use_vb_audio=True)
-            if not await controller.setup_driver(): return False
+            if not await controller.setup_driver():
+                self.start_failures[session_id] = SessionStatus.ERROR_JOIN_FAILED
+                return False
             if not await controller.join_meeting(meet_link, "AI Interviewer Bot"):
                 await controller.cleanup()
+                self.start_failures[session_id] = SessionStatus.ERROR_JOIN_FAILED
                 return False
 
             self.active_sessions[session_id] = {
@@ -44,6 +53,7 @@ class MeetSessionManager:
             return True
         except Exception as e:
             logger.error(f"Error starting bot session {session_id}: {e}", exc_info=True)
+            self.start_failures[session_id] = SessionStatus.ERROR_JOIN_FAILED
             return False
 
     def _start_candidate_video_capture(self, session_id: str):
@@ -205,6 +215,10 @@ class MeetSessionManager:
                 await asyncio.wait_for(capture_task, timeout=5.0)
             except asyncio.TimeoutError:
                 capture_task.cancel()
+                try:
+                    await capture_task
+                except asyncio.CancelledError:
+                    pass
         try:
             async with session['lock']:
                 await session['controller'].leave_meeting()
@@ -222,5 +236,11 @@ class MeetSessionManager:
         return False
 
     def get_session(self, session_id): return self.active_sessions.get(session_id)
+    def get_start_failure(self, session_id: str): return self.start_failures.pop(session_id, None)
     def get_all_active_sessions(self): return dict(self.active_sessions)
-    def can_accept_session(self): return len(self.active_sessions) < 5
+    def can_accept_session(self): return not self.active_sessions
+
+    async def shutdown_all_sessions(self):
+        """Close every active browser context during process shutdown."""
+        for session_id in list(self.active_sessions):
+            await self.end_session(session_id)

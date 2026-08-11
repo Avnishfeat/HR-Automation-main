@@ -8,8 +8,17 @@ from pathlib import Path
 
 from app.agents.interview.config.constants import SessionStatus, BrowserConfig
 from app.agents.interview.core.limiter import get_concurrency_limiter
+from app.agents.interview.core.local_state import save_terminal_status
 from app.agents.interview.core.startup import get_services
-from app.utils.webhook_client import dispatch_webhook
+from app.agents.interview.core.session_error_tracker import (
+    clear_session_errors,
+    get_session_errors,
+    install_session_error_log_handler,
+    record_session_error,
+    reset_error_tracking_session,
+    set_error_tracking_session,
+)
+from app.utils.webhook_outbox import enqueue_webhook
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -40,22 +49,31 @@ async def start_and_conduct_interview_task(
     """Background task - Stateless Local Storage Version (Async)"""
     logger.info(f"[Task: {session_id}] Background task started (Stateless/Async)")
 
-    services = get_services()
-    meet_session_mgr = services.meet_session_mgr
-    meet_orchestrator = services.meet_orchestrator
-    combined_analyzer = services.combined_analyzer
-    interview_service = services.interview_service
-    concurrency_limiter = get_concurrency_limiter()
-
-    snapshot_count = 0
+    meet_session_mgr = None
+    meet_orchestrator = None
+    combined_analyzer = None
+    interview_service = None
+    concurrency_limiter = None
     session_closed = False
     interview_state_closed = False
     interview_memory_cleaned = False
     concurrency_released = False
-    candidate_name = interview_service.get_candidate_name(session_id) if interview_service else "Candidate"
+    candidate_name = "Candidate"
     transcript_text = ""
+    completion_status: Optional[str] = None
+    final_webhook_queued = False
+    install_session_error_log_handler()
+    error_tracking_token = set_error_tracking_session(session_id)
 
     try:
+        services = get_services()
+        meet_session_mgr = services.meet_session_mgr
+        meet_orchestrator = services.meet_orchestrator
+        combined_analyzer = services.combined_analyzer
+        interview_service = services.interview_service
+        concurrency_limiter = get_concurrency_limiter()
+        candidate_name = interview_service.get_candidate_name(session_id) if interview_service else "Candidate"
+
         # 1. Start Bot (Async)
         success = await meet_session_mgr.start_bot_session(
             session_id=session_id,
@@ -66,20 +84,20 @@ async def start_and_conduct_interview_task(
             video_capture_method=video_capture_method
         )
         if not success:
-            if webhook_url:
-                dispatch_webhook(webhook_url, {"event": "error", "session_id": session_id, "error": "Bot join failed"})
+            completion_status = meet_session_mgr.get_start_failure(session_id) or SessionStatus.ERROR_JOIN_FAILED
+            record_session_error(session_id, "meet_session", "Bot join failed", "BotJoinError")
             return
 
         # Wait for candidate (Async)
         candidate_joined = await meet_session_mgr.wait_for_candidate(session_id)
         if not candidate_joined:
-            if webhook_url:
-                dispatch_webhook(webhook_url, {
-                    "event": "error",
-                    "session_id": session_id,
-                    "status": SessionStatus.ERROR_CANDIDATE_NO_SHOW,
-                    "error": "Candidate did not join within the allowed time or participant validation failed"
-                })
+            completion_status = SessionStatus.ERROR_CANDIDATE_NO_SHOW
+            record_session_error(
+                session_id,
+                "participant_monitor",
+                "Candidate did not join within the allowed time or participant validation failed",
+                "CandidateNoShow",
+            )
             return
 
         if enable_video:
@@ -92,15 +110,18 @@ async def start_and_conduct_interview_task(
             orchestration_result = await meet_orchestrator.conduct_interview(session_id=session_id)
         except Exception as e:
             logger.error(f"Orchestration failed: {e}", exc_info=True)
+            orchestration_result = None
             
         duration_sec = int(time.time() - interview_start_time)
         orchestration_status = None
         ended_early = False
         if isinstance(orchestration_result, dict):
             orchestration_status = orchestration_result.get("status")
+            completion_status = orchestration_status or SessionStatus.ERROR_FATAL_TASK
             if orchestration_status and orchestration_status != SessionStatus.COMPLETED:
                 ended_early = True
         else:
+            completion_status = SessionStatus.ERROR_FATAL_TASK
             ended_early = True # Fallback if we didn't get a proper dict
 
         # 3. Cleanup & Finalize Local Data
@@ -147,7 +168,8 @@ async def start_and_conduct_interview_task(
 
         await asyncio.gather(*analysis_tasks)
 
-        # 5. Dispatch Webhook
+        # 5. Persist final webhook(s) for asynchronous delivery.  This keeps
+        # report delivery off the interview event loop and survives a restart.
         try:
             final_report = analysis_results.get("final_report")
             if not final_report:
@@ -170,10 +192,12 @@ async def start_and_conduct_interview_task(
                 )
 
             if final_report:
+                session_errors = get_session_errors(session_id)
+                final_report = _attach_agent_errors(final_report, session_errors)
                 # 1. Actionabl Webhook Integration
                 actionabl_url = settings.ACTIONABL_API_URL
                 if actionabl_url:
-                    logger.info(f"Dispatching final JSON report to Actionabl API: {actionabl_url}")
+                    logger.info(f"Queueing final JSON report to Actionabl API: {actionabl_url}")
                     headers = {
                         "Content-Type": "application/json"
                     }
@@ -185,24 +209,28 @@ async def start_and_conduct_interview_task(
                     actionabl_payload = {
                         "event": "analysis_completed",
                         "session_id": session_id,
-                        "analysis": json.dumps(final_report)
+                        "analysis": json.dumps(final_report),
+                        "agent_errors": session_errors,
                     }
                         
-                    dispatch_webhook(
+                    enqueue_webhook(
                         actionabl_url, 
                         actionabl_payload,
                         headers=headers
                     )
+                    final_webhook_queued = True
                 
                 # 2. Original Webhook Integration (Optional, can be kept or removed based on preference)
                 if webhook_url:
-                    logger.info(f"Dispatching standard webhook to {webhook_url}")
-                    webhook_sent = dispatch_webhook(webhook_url, {
+                    logger.info(f"Queueing standard webhook to {webhook_url}")
+                    enqueue_webhook(webhook_url, {
                         "event": "analysis_completed",
                         "session_id": session_id,
                         "transcript_path": str(transcript_path),
-                        "analysis": json.dumps(final_report)
+                        "analysis": json.dumps(final_report),
+                        "agent_errors": session_errors,
                     })
+                    final_webhook_queued = True
                     
                 # Always cleanup if we successfully generated the report, regardless of webhook success
                 await _cleanup_in_memory_session(
@@ -218,10 +246,13 @@ async def start_and_conduct_interview_task(
         except Exception as e:
             logger.error(f"Combined analysis/webhook failed: {e}")
 
+    except asyncio.CancelledError:
+        completion_status = SessionStatus.ERROR_FATAL_TASK
+        record_session_error(session_id, "task_runtime", "Interview task cancelled during shutdown", "TaskCancelled")
+        raise
     except Exception as e:
         logger.error(f"FATAL ERROR: {e}", exc_info=True)
-        if webhook_url:
-            dispatch_webhook(webhook_url, {"event": "fatal_error", "session_id": session_id, "error": str(e)})
+        completion_status = SessionStatus.ERROR_FATAL_TASK
     finally:
         if interview_service and not interview_state_closed:
             try:
@@ -237,6 +268,23 @@ async def start_and_conduct_interview_task(
             await meet_session_mgr.end_session(session_id)
         if concurrency_limiter and not concurrency_released:
             concurrency_limiter.release(session_id)
+        terminal_status = completion_status or SessionStatus.ERROR_FATAL_TASK
+        try:
+            save_terminal_status(session_id, terminal_status)
+        except Exception:
+            logger.exception("Could not save terminal interview status for %s", session_id)
+        if not final_webhook_queued:
+            try:
+                _queue_terminal_notifications(
+                    session_id=session_id,
+                    completion_status=terminal_status,
+                    session_errors=get_session_errors(session_id),
+                    webhook_url=webhook_url,
+                )
+            except Exception:
+                logger.exception("Could not persist terminal webhook event for %s", session_id)
+        clear_session_errors(session_id)
+        reset_error_tracking_session(error_tracking_token)
 
 
 async def _cleanup_in_memory_session(session_id, interview_service, meet_session_mgr, concurrency_limiter):
@@ -269,7 +317,7 @@ def _build_fallback_final_report(
     if ended_early:
         flags.append("ended_interview_early")
 
-    if orchestration_status == "terminated_liveness_fail":
+    if orchestration_status == SessionStatus.TERMINATED_LIVENESS_FAIL:
         termination_reason = "mid_interview_liveness_failed"
         flags.append("mid_interview_liveness_failed")
     elif orchestration_status:
@@ -285,7 +333,7 @@ def _build_fallback_final_report(
             "role": job_role,
         },
         "status": {
-            "completed": True,
+            "completed": orchestration_status == SessionStatus.COMPLETED,
             "ended_early": ended_early,
             "duration_sec": duration_sec,
             "termination_reason": termination_reason,
@@ -295,12 +343,12 @@ def _build_fallback_final_report(
             "technical": None,
             "communication": None,
             "behavioral": None,
-            "authenticity": 1.0 if orchestration_status == "terminated_liveness_fail" else None,
+            "authenticity": 1.0 if orchestration_status == SessionStatus.TERMINATED_LIVENESS_FAIL else None,
         },
         "flags": flags,
         "summary": (
             "Interview ended because the candidate failed the mid-interview liveness check."
-            if orchestration_status == "terminated_liveness_fail"
+            if orchestration_status == SessionStatus.TERMINATED_LIVENESS_FAIL
             else "Interview ended before a generated analysis report was available."
         ),
         "recommendation": "review",
@@ -312,3 +360,45 @@ def _build_fallback_final_report(
             "analysis_fallback": True,
         },
     }
+
+
+def _attach_agent_errors(final_report, session_errors):
+    """Embed agent errors in dict-based reports without changing other report types."""
+    if not isinstance(final_report, dict):
+        return final_report
+
+    report = dict(final_report)
+    metadata = report.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+    report["metadata"] = {
+        **metadata,
+        "agent_error_count": len(session_errors),
+        "agent_errors": session_errors,
+    }
+    return report
+
+
+def _queue_terminal_notifications(
+    session_id: str,
+    completion_status: str,
+    session_errors: list[dict],
+    webhook_url: Optional[str],
+) -> None:
+    """Queue an error/no-show result to every configured final-report sink."""
+    payload = {
+        "event": "interview_completed",
+        "session_id": session_id,
+        "status": completion_status,
+        "agent_errors": session_errors,
+    }
+    actionabl_url = settings.ACTIONABL_API_URL
+    if actionabl_url:
+        headers = {"Content-Type": "application/json"}
+        if settings.ACTIONABL_AUTH_TOKEN:
+            headers["Authorization"] = f"Bearer {settings.ACTIONABL_AUTH_TOKEN}"
+        if settings.ACTIONABL_AUTH_ID:
+            headers["auth-id"] = settings.ACTIONABL_AUTH_ID
+        enqueue_webhook(actionabl_url, payload, headers=headers)
+    if webhook_url:
+        enqueue_webhook(webhook_url, payload)

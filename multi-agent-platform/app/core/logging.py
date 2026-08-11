@@ -3,6 +3,7 @@ import logging.config
 import logging
 import os
 import re
+from collections.abc import Mapping
 from pathlib import Path
 from typing import List
 
@@ -71,19 +72,22 @@ class SecretsFilter(logging.Filter):
                 msg = pattern.sub("[REDACTED]", msg)
             record.msg = msg
         
-        # Also check args for secret values
+        # Also check args for secret values.  Logging treats a single mapping
+        # argument specially; converting it to a tuple of keys breaks `%s`
+        # formatting and can make a background task emit logging errors.
         if self._patterns and record.args:
-            new_args = []
-            for arg in record.args:
+            def mask_value(arg):
                 if isinstance(arg, str):
                    arg_str = arg
                    for pattern in self._patterns:
                        arg_str = pattern.sub("[REDACTED]", arg_str)
-                   new_args.append(arg_str)
-                else:
-                   # Preserve original type (int, float, etc.) to valid logging formatting
-                   new_args.append(arg)
-            record.args = tuple(new_args)
+                   return arg_str
+                return arg
+
+            if isinstance(record.args, Mapping):
+                record.args = {key: mask_value(value) for key, value in record.args.items()}
+            else:
+                record.args = tuple(mask_value(arg) for arg in record.args)
         
         return True  # Always allow the record (after masking)
 

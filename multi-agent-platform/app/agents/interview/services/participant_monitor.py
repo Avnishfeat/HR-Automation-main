@@ -45,6 +45,14 @@ class ParticipantMonitor:
         if self.monitor_task and not self.monitor_task.done():
             self.monitor_task.cancel()
 
+    async def wait_stopped(self):
+        """Await task cancellation so a session cannot leak a monitor."""
+        if self.monitor_task:
+            try:
+                await self.monitor_task
+            except asyncio.CancelledError:
+                pass
+
     async def _monitoring_loop(self):
         check_interval = LoggingConfig.PARTICIPANT_CHECK_LOG_INTERVAL_SEC
 
@@ -140,7 +148,10 @@ class ParticipantMonitor:
         if self.violation_detected: return
         
         self.violation_detected = True
-        logger.critical(f"VIOLATION: {violation_type} | Count: {count} | Names: {names}")
+        if violation_type == "candidate_disconnected":
+            logger.warning("Candidate disconnected | Count: %s", count)
+        else:
+            logger.critical(f"VIOLATION: {violation_type} | Count: {count} | Names: {names}")
         
         if self.on_violation:
             try:

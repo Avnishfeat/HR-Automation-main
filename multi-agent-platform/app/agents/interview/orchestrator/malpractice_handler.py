@@ -25,15 +25,27 @@ class MalpracticeHandler:
         self.session_mgr = session_mgr
         self.interview_svc = interview_svc
         self.audio_handler = audio_handler
-        self.processing = threading.Event()
+        self._processing_by_session: dict[str, threading.Event] = {}
+        self._processing_lock = threading.Lock()
+
+    def _processing_event(self, session_id: str) -> threading.Event:
+        with self._processing_lock:
+            return self._processing_by_session.setdefault(session_id, threading.Event())
+
+    def is_processing(self, session_id: str) -> bool:
+        return self._processing_event(session_id).is_set()
     
     def handle_violation(self, session: "InterviewSession", count: int, violation_type: str, names: list):
         """Main handler for malpractice violations."""
-        logger.critical(f"Handling Malpractice: {violation_type}")
+        if violation_type == "candidate_disconnected":
+            logger.warning("Handling candidate disconnection")
+        else:
+            logger.critical(f"Handling Malpractice: {violation_type}")
         
-        if self.processing.is_set():
+        processing = self._processing_event(session.session_id)
+        if processing.is_set():
             return
-        self.processing.set()
+        processing.set()
         
         # Dispatch to async handler to avoid blocking or 'coroutine never awaited' errors
         try:
@@ -43,11 +55,19 @@ class MalpracticeHandler:
         except RuntimeError:
             # Fallback if no running loop (shouldn't happen in our FastAPI app)
             logger.error("No running event loop found for malpractice handler.")
-            self.processing.clear()
+            processing.clear()
             
     async def _async_handle_violation(self, session: "InterviewSession", count: int, violation_type: str, names: list):
         try:
             session.stop_event.set()
+            session_data = self.session_mgr.get_session(session.session_id)
+            if violation_type == "candidate_disconnected":
+                if session_data is not None:
+                    session_data["status"] = SessionStatus.ERROR_CANDIDATE_LEFT
+                logger.info("Candidate disconnected; ending session %s without malpractice warning", session.session_id)
+                return
+            if session_data is not None:
+                session_data["status"] = SessionStatus.ERROR_MULTIPLE_PARTICIPANTS
             
             # Log to memory/logger
             incident_data = {
@@ -74,7 +94,7 @@ class MalpracticeHandler:
         except Exception as e:
             logger.error(f"Error handling malpractice: {e}")
         finally:
-            self.processing.clear()
+            self._processing_event(session.session_id).clear()
     
     def _get_warning_for_type(self, violation_type: str) -> tuple:
         """Returns (warning_text, should_terminate) for violation type."""
