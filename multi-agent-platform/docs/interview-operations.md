@@ -11,5 +11,5 @@ The health endpoint is:
 GET /api/v1/interview/health/detailed
 ```
 
-It is suitable for a reverse-proxy monitor and reports audio, disk write,
-STT/TTS, LLM, active session/task, webhook-outbox, and local-retention state.
+It is suitable for a reverse-proxy monitor and reports audio, PostgreSQL, disk
+write, STT/TTS, LLM, active session/task, and local-retention state.

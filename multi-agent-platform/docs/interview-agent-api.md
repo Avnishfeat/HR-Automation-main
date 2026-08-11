@@ -18,7 +18,7 @@ outside a trusted network.
 2. Store the returned `session_id`.
 3. Poll `GET /{session_id}/status` while the session runs.
 4. Optionally request termination with `POST /{session_id}/end`.
-5. Receive the final result and any agent errors at `webhook_url`.
+5. Poll `GET /analysis/{buss_id}` until a terminal result is available.
 
 ## Start a Google Meet Interview
 
@@ -43,12 +43,13 @@ join or for the interview to finish.
 | `enable_video` | boolean | No | `true` | Enables candidate video capture and integrity checks. |
 | `job_description` | string | No | `null` | Job-description context for interview generation. |
 | `video_capture_method` | string | No | `javascript` | Candidate-video capture method. |
-| `webhook_url` | string | No | `null` | Callback endpoint for final interview delivery. |
+| `X-Idempotency-Key` | HTTP header | No | — | Stable third-party appointment/interview ID used to make retries safe. |
 
 Example:
 
 ```bash
 curl -X POST "https://<host>/api/v1/interview/start-google-meet" \
+  -H "X-Idempotency-Key: third-party-interview-12345" \
   -F "meet_link=https://meet.google.com/abc-defg-hij" \
   -F "job_role=Data Analyst" \
   -F "candidate_email=candidate@example.com" \
@@ -56,7 +57,6 @@ curl -X POST "https://<host>/api/v1/interview/start-google-meet" \
   -F "job_description=Analyze data and build business dashboards." \
   -F 'questionnaire_json=["Describe a SQL optimization you made.","How do you validate a dashboard?"]' \
   -F "enable_video=true" \
-  -F "webhook_url=https://client.example.com/webhooks/interview" \
   -F "resume=@/path/to/candidate-resume.pdf;type=application/pdf"
 ```
 
@@ -68,6 +68,20 @@ Successful response (`202 Accepted`):
   "session_id": "8f2b7b5f-3f1f-49d7-8895-6a98ad3c0a55"
 }
 ```
+
+### Safe Start Retries
+
+When a third-party platform may retry after a timeout or lost response, send a
+stable `X-Idempotency-Key` on the original request and every retry. Use its
+unique scheduled interview/appointment ID, not `buss_id` unless `buss_id` is
+unique per interview.
+
+If the original request was accepted, a retry returns `202 Accepted` with the
+same `session_id`, `idempotent_replay: true`, and the
+`Idempotent-Replay: true` response header. It does not start another bot.
+
+The PostgreSQL deployment keeps accepted keys for 90 days by default.
+Set `IDEMPOTENCY_KEY_RETENTION_DAYS` to change that retention period.
 
 Errors:
 
@@ -108,9 +122,9 @@ Responses:
 }
 ```
 
-`active_or_not_found` means no process-local task/session and no file-backed
-terminal status were found. Terminal statuses are retained in the session data
-directory; the webhook remains the authoritative final delivery.
+`active_or_not_found` means no process-local task/session and no persisted
+interview record were found. Use analysis retrieval by `buss_id` for the final
+result.
 
 ## End an Interview
 
@@ -119,7 +133,7 @@ POST /{session_id}/end
 ```
 
 Requests a graceful stop. The interview task performs its normal cleanup and
-will send its final webhook payload if one was configured.
+persists its terminal result for analysis retrieval.
 
 Example:
 
@@ -139,60 +153,48 @@ Response:
 Errors: `404` when the session is not active, `503` when the session manager is
 unavailable, or `500` for an unexpected termination error.
 
-## Webhook Delivery
+## Retrieve Interview Analysis
 
-Final webhooks are first written to the local `data/webhook_outbox` before any
-network request. A background delivery worker sends due events without blocking
-the interview task. It retries non-2xx responses and request failures after
-30, 60, and 120 seconds (four total attempts). Delivered and exhausted events
-remain on disk for operational inspection; monitor the health endpoint below.
+```http
+GET /analysis/{buss_id}
+```
 
-Consumers should accept duplicate delivery for the same `session_id` and
-`event`, respond with a `2xx` promptly, and process the payload
-asynchronously.
+Actionabl should poll this endpoint with the same globally unique `buss_id`
+sent when creating the interview. The platform sends no completion webhooks.
 
-### Completed analysis
+While the interview or analysis is pending, the response is `202 Accepted`:
 
 ```json
 {
-  "event": "analysis_completed",
+  "buss_id": "BUSS-123",
   "session_id": "8f2b7b5f-3f1f-49d7-8895-6a98ad3c0a55",
-  "transcript_path": "data/8f2b7b5f-3f1f-49d7-8895-6a98ad3c0a55/transcript.txt",
-  "analysis": "{...serialized final report...}",
-  "agent_errors": []
+  "status": "analyzing",
+  "terminal_reason": null,
+  "analysis": null,
+  "agent_errors": [],
+  "completed_at": null,
+  "retry_after_seconds": 15
 }
 ```
 
-`analysis` is a JSON-encoded string. Parse it before reading report fields. For
-dict-based reports, `metadata.agent_errors` and
-`metadata.agent_error_count` repeat the error information.
+After a terminal result, the response is `200 OK` and `analysis` contains the
+full final report, including transcript and agent errors. A terminal failure
+before report generation returns `analysis: null` with its final status,
+`terminal_reason`, and agent errors. Unknown IDs return `404`.
 
-### Ended before analysis
+### Interrupted interview recovery
 
-If the bot cannot join, the candidate does not join, or the task fails before
-analysis, the final payload is:
+Actionabl must treat the following terminal results as requiring a replacement
+interview. It creates that replacement with a new globally unique `buss_id` and
+retains the original interrupted record as audit history:
 
-```json
-{
-  "event": "interview_completed",
-  "session_id": "8f2b7b5f-3f1f-49d7-8895-6a98ad3c0a55",
-  "status": "error_join_failed",
-  "agent_errors": [
-    {
-      "timestamp": "2026-08-10T12:00:00+00:00",
-      "component": "meet_session",
-      "type": "BotJoinError",
-      "message": "Bot join failed"
-    }
-  ]
-}
-```
+| Status | `terminal_reason` | Meaning |
+| --- | --- | --- |
+| `interrupted` | `backend_shutdown` | The backend performed a controlled shutdown and cancelled an active interview task. |
+| `interrupted` | `backend_restarted` | The backend/VM stopped unexpectedly; the next startup recovered the unfinished record. |
 
-Each `agent_errors` item has a UTC timestamp, component, type, and message.
-Messages are limited to 2,000 characters; stack traces are excluded.
-
-Possible error statuses are `error_capacity_reached`, `error_join_failed`,
-`error_candidate_no_show`, and `error_fatal_task`.
+The Interview Agent does not automatically rejoin a Meet, send a webhook, or
+notify the candidate or operator for either condition.
 
 ## Operational Health
 
@@ -202,9 +204,9 @@ GET /health/detailed
 ```
 
 Both routes are under the Interview Agent base URL. The detailed endpoint
-returns `503` if required services, disk storage, STT/TTS, LLM, or Linux audio
-are unhealthy. It also reports the active task/session count and webhook
-outbox counts (`pending`, `delivered`, and `failed`).
+returns `503` if PostgreSQL, required services, disk storage, STT/TTS, LLM, or
+Linux audio are unhealthy. It also reports active task/session count and local
+retention state.
 
 The deployment is deliberately limited to one concurrent interview by default
 (`MAX_CONCURRENT_INTERVIEWS=1`), because Chrome's persistent profile and the
@@ -224,7 +226,7 @@ the `aiplatform.endpoints.predict` permission for Gemini-TTS.
 Before synthesis, the agent applies a TTS-only glossary. It pronounces stack
 names such as `MERN`, `MEAN`, `PERN`, `LAMP`, and `JAMstack` as words, and
 spells `API`, `AWS`, `SQL`, `HTML`, `CSS`, and `CI/CD` letter by letter. This
-does not modify stored transcripts, reports, or webhook payloads.
+does not modify stored transcripts, reports, or database-backed analysis records.
 
 Use `TTS_PRONUNCIATION_OVERRIDES_JSON` to extend the glossary or replace a
 default entry. It must be a JSON object of source text to the desired spoken

@@ -109,6 +109,7 @@ class SessionStatus:
     COMPLETED: Final[str] = "completed"
     COMPLETED_NO_ANALYSIS: Final[str] = "completed_no_analysis"
     TIME_LIMIT_REACHED: Final[str] = "time_limit_reached"
+    INTERRUPTED: Final[str] = "interrupted"
 
     ERROR_CAPACITY_REACHED: Final[str] = "error_capacity_reached"
     ERROR_JOIN_FAILED: Final[str] = "error_join_failed"
@@ -127,6 +128,11 @@ class TerminationReason:
     TIME_LIMIT_REACHED: Final[str] = "time_limit_reached"
     CANDIDATE_LEFT: Final[str] = "candidate_left"
     MULTIPLE_PARTICIPANTS: Final[str] = "multiple_participants"
+
+
+class InterruptionReason:
+    BACKEND_SHUTDOWN: Final[str] = "backend_shutdown"
+    BACKEND_RESTARTED: Final[str] = "backend_restarted"
 
 class StaticMessages:
     # Cache keys

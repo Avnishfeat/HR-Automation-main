@@ -5,13 +5,20 @@ import json
 import uuid
 from typing import Optional, List
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request, Response
+from fastapi import APIRouter, UploadFile, File, Form, Header, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 
 from app.agents.interview.core.startup import get_services
 from app.agents.interview.core.background import start_and_conduct_interview_task
 from app.agents.interview.core.task_registry import create_interview_task
 from app.agents.interview.core.task_registry import is_task_active
-from app.agents.interview.core.local_state import get_terminal_status
+from app.agents.interview.database import (
+    create_or_get_interview,
+    delete_pending_interview,
+    get_interview_by_buss_id,
+    get_interview_by_idempotency_key,
+    normalize_idempotency_key,
+)
 from app.core.exceptions import (
     ValidationError,
     InterviewExecutionError
@@ -21,6 +28,13 @@ from app.agents.interview.core.limiter import get_concurrency_limiter, RATE_LIMI
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+TERMINAL_INTERVIEW_STATUSES = {
+    "completed", "completed_no_analysis", "time_limit_reached", "interrupted",
+    "error_capacity_reached", "error_join_failed", "error_candidate_no_show",
+    "error_candidate_left", "error_multiple_participants", "error_analysis_empty",
+    "error_analysis_failed", "error_fatal_task", "terminated_liveness_fail",
+    "aborted_multiple_participants", "aborted_multiple_participants_timeout",
+}
 
 @router.post("/start-google-meet", status_code=202)
 @limiter.limit(RATE_LIMITS["start_interview"])
@@ -34,15 +48,37 @@ async def start_google_meet_interview(
     job_role: str = Form(...),
     job_description: Optional[str] = Form(None),
     video_capture_method: str = Form("javascript"),
-    webhook_url: Optional[str] = Form(None),
     candidate_email: str = Form(...),
     buss_id: str = Form(...),
-    resume: UploadFile = File(...)
+    resume: UploadFile = File(...),
+    idempotency_key_header: Optional[str] = Header(None, alias="X-Idempotency-Key"),
 ):
     """
     Start a new Google Meet interview session (Stateless).
     Generates a UUID session_id and dispatches background task.
     """
+    try:
+        idempotency_key = normalize_idempotency_key(idempotency_key_header)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    buss_id = buss_id.strip()
+    if not buss_id:
+        raise HTTPException(status_code=400, detail="buss_id must not be blank")
+
+    # Return the original accepted response before capacity checks or file parsing.
+    # Either the unique buss_id or an explicit idempotency key can safely replay it.
+    existing = await get_interview_by_buss_id(buss_id)
+    if not existing and idempotency_key:
+        existing = await get_interview_by_idempotency_key(idempotency_key)
+    if existing:
+        response.headers["Idempotent-Replay"] = "true"
+        return {
+            "status": existing.status,
+            "session_id": existing.session_id,
+            "idempotent_replay": True,
+        }
+
     logger.info(f"Starting interview for role: {job_role}")
     
     services = get_services()
@@ -103,6 +139,24 @@ async def start_google_meet_interview(
             if not slot_acquired:
                 raise HTTPException(status_code=503, detail="Server capacity reached")
 
+        interview, created = await create_or_get_interview(
+            session_id=session_id,
+            buss_id=buss_id,
+            candidate_email=candidate_email,
+            job_role=job_role,
+            job_description=job_description,
+            idempotency_key=idempotency_key,
+        )
+        if not created:
+            if concurrency_limiter and slot_acquired:
+                concurrency_limiter.release(session_id)
+            response.headers["Idempotent-Replay"] = "true"
+            return {
+                "status": interview.status,
+                "session_id": interview.session_id,
+                "idempotent_replay": True,
+            }
+
         services.interview_service.start_new_interview(
             resume_text=resume_content,
             job_role=job_role,
@@ -116,7 +170,6 @@ async def start_google_meet_interview(
             start_and_conduct_interview_task(
             session_id=session_id,
             meet_link=meet_link,
-            webhook_url=webhook_url,
             audio_device=audio_device,
             enable_video=enable_video,
             video_capture_method=video_capture_method,
@@ -126,25 +179,51 @@ async def start_google_meet_interview(
             buss_id=buss_id
             ),
         )
-        
     except Exception as e:
         if concurrency_limiter and slot_acquired:
             concurrency_limiter.release(session_id)
+        await delete_pending_interview(session_id)
         logger.error(f"Failed to schedule task: {e}", exc_info=True)
         if isinstance(e, HTTPException): raise e
         raise InterviewExecutionError(session_id, "task_scheduling", str(e))
     
     return {"status": "pending", "session_id": session_id}
 
+
+@router.get("/analysis/{buss_id}")
+async def get_interview_analysis(buss_id: str):
+    """Return a full terminal report, or a polling response while it is pending."""
+    interview = await get_interview_by_buss_id(buss_id)
+    if not interview:
+        raise HTTPException(status_code=404, detail="Interview not found")
+
+    payload = {
+        "buss_id": interview.buss_id,
+        "session_id": interview.session_id,
+        "status": interview.status,
+        "terminal_reason": interview.terminal_reason,
+        "analysis": interview.analysis_json,
+        "agent_errors": interview.agent_errors or [],
+        "completed_at": interview.completed_at.isoformat() if interview.completed_at else None,
+    }
+    if interview.status not in TERMINAL_INTERVIEW_STATUSES:
+        payload["retry_after_seconds"] = 15
+        return JSONResponse(status_code=202, content=payload)
+    return payload
+
 @router.get("/{session_id}/status")
-def get_interview_status(session_id: str):
+async def get_interview_status(session_id: str):
     """
-    Check if a session is still active or completed.
-    Stateless check: presence of report on disk.
+    Check a session's persisted lifecycle status, retaining an in-process
+    fallback for legacy callers while a task is starting.
     """
-    terminal_status = get_terminal_status(session_id)
-    if terminal_status:
-        return terminal_status
+    # This endpoint remains session-based for existing callers; the new analysis
+    # endpoint is the third-party retrieval API keyed by buss_id.
+    from app.agents.interview.database import Interview, database_session
+    async with database_session() as session:
+        interview = await session.get(Interview, session_id)
+    if interview:
+        return {"status": interview.status, "session_id": interview.session_id}
 
     services = get_services()
     if is_task_active(session_id) or (services.meet_session_mgr and services.meet_session_mgr.get_session(session_id)):

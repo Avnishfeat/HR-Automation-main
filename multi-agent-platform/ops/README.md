@@ -31,12 +31,10 @@ sudo -u ai XDG_RUNTIME_DIR=/run/user/1004 PULSE_SERVER=unix:/run/user/1004/pulse
 
 ## Health monitoring
 
-Configure the optional alert destination, then install the one-minute systemd
-timer:
+Install the one-minute systemd timer:
 
 ```bash
 cp ops/interview-monitor.env.example ops/interview-monitor.env
-# Edit INTERVIEW_HEALTH_ALERT_WEBHOOK if alerts should reach another system.
 mkdir -p ~/.config/systemd/user
 cp ops/systemd/interview-health-monitor.service ~/.config/systemd/user/
 cp ops/systemd/interview-health-monitor.timer ~/.config/systemd/user/
@@ -45,7 +43,8 @@ systemctl --user enable --now interview-health-monitor.timer
 systemctl --user status interview-health-monitor.timer
 ```
 
-Without an alert webhook, failed checks are still visible in the user journal:
+Failed checks are visible in the user journal and return a non-zero status for
+your monitoring system:
 
 ```bash
 journalctl --user -u interview-health-monitor.service -f
@@ -57,26 +56,24 @@ Run only during a maintenance window; each mode first refuses if the health
 endpoint reports an active interview.
 
 ```bash
-ops/test-interview-recovery.sh webhook
+ops/test-interview-recovery.sh database
 ops/test-interview-recovery.sh chrome-lock-check
 ops/test-interview-recovery.sh pm2
 ops/test-interview-recovery.sh audio
 ```
 
 `pm2` verifies the backend restart, `audio` verifies PipeWire/Pulse recovery,
-and `webhook` exercises a failed delivery followed by a retry. The Chrome mode
-does not create or remove a real profile lock; it reports the safe behavior.
+and `database` verifies that PostgreSQL can be opened and queried. The Chrome
+mode does not create or remove a real profile lock; it reports the safe behavior.
 
 ## Retention
 
-The backend runs retention once at startup and then hourly. Defaults are:
+The backend runs retention at startup and then hourly. Defaults are:
 
-- delivered webhook events: 7 days
-- failed webhook events: 90 days
-- terminal interview session directories: 30 days
+- terminal PostgreSQL interview records: 90 days
+- terminal interview session directories: 90 days
 
-Override them with `WEBHOOK_OUTBOX_DELIVERED_RETENTION_DAYS`,
-`WEBHOOK_OUTBOX_FAILED_RETENTION_DAYS`,
+Override them with `INTERVIEW_RECORD_RETENTION_DAYS`,
 `INTERVIEW_SESSION_RETENTION_DAYS`, and
-`LOCAL_RETENTION_CLEANUP_INTERVAL_SECONDS`. Pending webhook events and active
-sessions are never deleted by this job.
+`LOCAL_RETENTION_CLEANUP_INTERVAL_SECONDS`. Pending and active interviews are
+never deleted by this job.

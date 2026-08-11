@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     GOOGLE_CLOUD_REGION: str = "us"
     GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = None
     SPEECH_API_VERSION: str = "v2"
+    DATABASE_URL: Optional[str] = None
+    DATABASE_CONNECT_TIMEOUT_SEC: int = 5
+    IDEMPOTENCY_KEY_RETENTION_DAYS: int = 90
+    INTERVIEW_RECORD_RETENTION_DAYS: int = 90
     
     # Browser Settings
     CHROME_PROFILE_PATH: str = "./chrome_profile"
@@ -38,11 +42,6 @@ class Settings(BaseSettings):
     MAX_CONCURRENT_INTERVIEWS: int = 5
     DEFAULT_INTERVIEW_DURATION_MINUTES: int = 30
     
-    # Actionabl Webhook Integration
-    ACTIONABL_API_URL: Optional[str] = None
-    ACTIONABL_AUTH_ID: Optional[str] = None
-    ACTIONABL_AUTH_TOKEN: Optional[str] = None
-
     @field_validator("DEBUG", "HEADLESS_MODE", mode="before")
     @classmethod
     def parse_boolish(cls, value: Any) -> Any:

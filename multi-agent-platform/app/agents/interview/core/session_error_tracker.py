@@ -1,4 +1,4 @@
-"""Collect interview-scoped error logs for final webhook delivery."""
+"""Collect interview-scoped error logs for the final persisted result."""
 
 from contextvars import ContextVar, Token
 from datetime import datetime, timezone

@@ -132,6 +132,12 @@ service_account.json
 
 .gemini
 tests/
+# Keep the PostgreSQL integration suite under version control. Existing local
+# test files remain ignored until they are deliberately reviewed and added.
+!tests/
+tests/*
+!tests/integration/
+!tests/integration/test_interview_persistence.py
 uploads/
 /.antigravitycli
 /.data

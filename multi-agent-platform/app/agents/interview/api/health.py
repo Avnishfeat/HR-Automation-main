@@ -11,7 +11,7 @@ from app.agents.interview.core.limiter import get_concurrency_limiter
 from app.agents.interview.core.task_registry import active_task_count
 from app.agents.interview.core.maintenance import get_maintenance_status
 from app.agents.interview.services.audio.linux_audio import linux_audio_ready
-from app.utils.webhook_outbox import get_outbox_status
+from app.agents.interview.database import database_is_healthy
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -31,7 +31,7 @@ async def health_check():
     return {
         "status": "healthy" if is_healthy else "degraded",
         "active_interview_tasks": active_task_count(),
-        "webhook_outbox": get_outbox_status(),
+        "database": "operational" if await database_is_healthy() else "error",
     }
 
 @router.get("/health/detailed", status_code=status.HTTP_200_OK)
@@ -81,8 +81,8 @@ async def detailed_health_check():
         except Exception:
             return False
 
-    llm_ok, disk_ok, stt_ok, tts_ok, audio_ok = await asyncio.gather(
-        check_llm(), check_disk_write(), check_stt(), check_tts(), asyncio.to_thread(linux_audio_ready)
+    llm_ok, disk_ok, stt_ok, tts_ok, audio_ok, database_ok = await asyncio.gather(
+        check_llm(), check_disk_write(), check_stt(), check_tts(), asyncio.to_thread(linux_audio_ready), database_is_healthy()
     )
     concurrency_limiter = get_concurrency_limiter()
 
@@ -94,17 +94,17 @@ async def detailed_health_check():
             "tts": "operational" if tts_ok else "error",
             "disk_storage": "writable" if disk_ok else "read-only",
             "linux_audio": "operational" if audio_ok else "error",
+            "postgresql": "operational" if database_ok else "error",
         },
         "runtime": {
             "active_interview_tasks": active_task_count(),
             "active_sessions": len(services.meet_session_mgr.get_all_active_sessions()) if services.meet_session_mgr else 0,
             "max_sessions": concurrency_limiter.max_sessions if concurrency_limiter else None,
-            "webhook_outbox": get_outbox_status(),
             "local_retention": get_maintenance_status(),
         },
     }
 
-    if not (llm_ok and disk_ok and stt_ok and tts_ok and audio_ok):
+    if not (llm_ok and disk_ok and stt_ok and tts_ok and audio_ok and database_ok):
         health_report["status"] = "degraded"
         return JSONResponse(status_code=503, content=health_report)
 

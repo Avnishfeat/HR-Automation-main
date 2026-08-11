@@ -31,13 +31,16 @@ from app.agents.interview.core.startup import (
     initialize_services as initialize_interview_services,
 )
 from app.agents.interview.core.cleanup import start_cleanup_task, stop_cleanup_task
-from app.agents.interview.core.task_registry import drain_interview_tasks
+from app.agents.interview.core.task_registry import (
+    drain_interview_tasks,
+    mark_interview_tasks_shutting_down,
+)
 from app.agents.interview.core.maintenance import run_local_retention_cleanup
+from app.agents.interview.database import close_database, initialize_database, mark_orphaned_interviews
 from app.agents.interview.services.audio.linux_audio import (
     configure_chromium_virtual_source,
     setup_linux_audio,
 )
-from app.utils.webhook_outbox import deliver_due_webhooks_async
 from app.agents.jd_agent.router import router as jd_router
 from app.agents.job_post_agent.router import router as job_post_agent_router
 from app.agents.question_generator.router import router as question_generator_router
@@ -64,18 +67,6 @@ async def _monitor_linux_audio() -> None:
             configure_chromium_virtual_source()
 
 
-async def _monitor_webhook_outbox() -> None:
-    """Deliver persisted completion notifications without blocking interviews."""
-    while True:
-        try:
-            summary = await deliver_due_webhooks_async(max_events=5)
-            if summary["delivered"] or summary["retried"] or summary["failed"]:
-                logger.info(f"Webhook outbox delivery summary: {summary}")
-        except Exception:
-            logger.exception("Webhook outbox delivery pass failed")
-        await asyncio.sleep(15)
-
-
 async def _monitor_local_retention() -> None:
     """Prune only terminal local artifacts on a low-frequency maintenance loop."""
     try:
@@ -86,7 +77,7 @@ async def _monitor_local_retention() -> None:
 
     while True:
         try:
-            summary = await asyncio.to_thread(run_local_retention_cleanup)
+            summary = await run_local_retention_cleanup()
             logger.info(f"Local retention cleanup summary: {summary}")
         except Exception:
             logger.exception("Local retention cleanup failed")
@@ -101,6 +92,10 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Multi-Agent Platform...")
 
     try:
+        await initialize_database()
+        interrupted_count = await mark_orphaned_interviews()
+        if interrupted_count:
+            logger.warning("Marked %s interrupted interview(s) after a prior backend stop", interrupted_count)
         initialize_interview_services()
         await start_cleanup_task()
         logger.info("Interview services initialized")
@@ -109,7 +104,6 @@ async def lifespan(app: FastAPI):
         raise
 
     audio_recovery_task = None
-    webhook_outbox_task = asyncio.create_task(_monitor_webhook_outbox(), name="webhook-outbox")
     retention_task = asyncio.create_task(_monitor_local_retention(), name="local-retention")
     if sys.platform.startswith("linux"):
         audio_recovery_task = asyncio.create_task(
@@ -129,22 +123,19 @@ async def lifespan(app: FastAPI):
                 pass
 
         services = get_services()
+        mark_interview_tasks_shutting_down()
         if services.meet_session_mgr:
             for session_id in list(services.meet_session_mgr.get_all_active_sessions()):
                 services.meet_session_mgr.request_session_stop(session_id)
         await drain_interview_tasks()
 
-        webhook_outbox_task.cancel()
-        try:
-            await webhook_outbox_task
-        except asyncio.CancelledError:
-            pass
         retention_task.cancel()
         try:
             await retention_task
         except asyncio.CancelledError:
             pass
         await stop_cleanup_task()
+        await close_database()
 
         logger.info("Shutting down...")
         logger.info("Application shut down successfully")

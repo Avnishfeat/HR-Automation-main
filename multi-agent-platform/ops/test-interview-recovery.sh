@@ -7,8 +7,8 @@ project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 health_url="${INTERVIEW_HEALTH_URL:-http://127.0.0.1:8048/api/v1/interview/health/detailed}"
 pm2_name="${PM2_APP_NAME:-multi-agent-backend}"
 
-if [[ ! "$mode" =~ ^(pm2|audio|webhook|chrome-lock-check)$ ]]; then
-  echo "Usage: $0 {pm2|audio|webhook|chrome-lock-check}" >&2
+if [[ ! "$mode" =~ ^(pm2|audio|database|chrome-lock-check)$ ]]; then
+  echo "Usage: $0 {pm2|audio|database|chrome-lock-check}" >&2
   exit 2
 fi
 
@@ -28,20 +28,16 @@ case "$mode" in
   audio)
     systemctl --user restart pipewire.service pipewire-pulse.service wireplumber.service
     ;;
-  webhook)
+  database)
     "$project_dir/venv/bin/python" -c '
-from pathlib import Path
-from tempfile import TemporaryDirectory
-from unittest.mock import Mock, patch
-import app.utils.webhook_outbox as outbox
-with TemporaryDirectory() as temp_dir:
-    outbox.OUTBOX_DIR = Path(temp_dir)
-    outbox.enqueue_webhook("https://example.invalid/interview", {"event": "recovery_test"})
-    with patch.object(outbox.requests, "post", side_effect=outbox.requests.ConnectionError("expected test failure")):
-        assert outbox.deliver_due_webhooks()["retried"] == 1
-    with patch.object(outbox.requests, "post", return_value=Mock(status_code=204)):
-        assert outbox.deliver_due_webhooks()["delivered"] == 1
-print("Webhook retry recovery test passed")'
+import asyncio
+from app.agents.interview.database import database_is_healthy, initialize_database, close_database
+async def main():
+    await initialize_database()
+    assert await database_is_healthy()
+    await close_database()
+asyncio.run(main())
+print("PostgreSQL recovery test passed")'
     ;;
   chrome-lock-check)
     lock_path="$project_dir/chrome_profile/SingletonLock"
@@ -53,7 +49,7 @@ print("Webhook retry recovery test passed")'
     ;;
 esac
 
-if [[ "$mode" != "webhook" && "$mode" != "chrome-lock-check" ]]; then
+if [[ "$mode" != "database" && "$mode" != "chrome-lock-check" ]]; then
   for _ in $(seq 1 12); do
     if "$project_dir/ops/check-interview-health.sh"; then
       echo "${mode} recovery test passed"

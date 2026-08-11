@@ -10,10 +10,14 @@ For production boot ordering, health monitoring, maintenance-window recovery,
 and retention settings, see [Interview Agent Operations](docs/interview-operations.md).
 
 Interview operations are single-session by default and expose health at
-`/api/v1/interview/health` and `/api/v1/interview/health/detailed`. Completion
-webhooks are written to the local `data/webhook_outbox` before delivery and
-retried asynchronously; see the Interview Agent reference for payloads and
-retry behavior.
+`/api/v1/interview/health` and `/api/v1/interview/health/detailed`.
+PostgreSQL persists interview lifecycle state and final reports. Actionabl
+retrieves a report by its unique `buss_id` through the Interview Agent API;
+the platform does not send completion webhooks.
+
+When an external scheduler starts an interview, it can send a stable
+`X-Idempotency-Key` header. Retrying the same request with that key returns the
+original session instead of starting a duplicate interview.
 
 ## Base URLs
 
@@ -434,7 +438,6 @@ Form fields:
 - `enable_video`: optional boolean, defaults to `true`
 - `job_description`: optional job description text
 - `video_capture_method`: optional value, defaults to `javascript`
-- `webhook_url`: optional callback URL for interview results/events
 - `candidate_email`: candidate email address
 - `buss_id`: business identifier associated with the candidate
 
@@ -450,7 +453,6 @@ curl -X POST "http://122.170.2.205:7010/api/v1/interview/start-google-meet" \
   -F "video_capture_method=javascript" \
   -F "candidate_email=candidate@example.com" \
   -F "buss_id=BUSS-123" \
-  -F "webhook_url=https://example.com/interview-webhook" \
   -F "resume=@/path/to/resume.pdf"
 ```
 
@@ -469,55 +471,14 @@ Possible errors:
 - `400`: invalid resume or invalid questionnaire JSON
 - `500`: interview task scheduling failed
 
-### Interview Webhook
+### Retrieve Interview Analysis
 
-When `webhook_url` is supplied, the platform sends a final payload when the
-interview finishes. A successful interview uses the `analysis_completed` event
-and includes the generated report as a JSON string. The payload includes
-`agent_errors`, an array of errors logged by interview-agent components during
-that session.
-
-```json
-{
-  "event": "analysis_completed",
-  "session_id": "8f2b7b5f-3f1f-49d7-8895-6a98ad3c0a55",
-  "transcript_path": "data/8f2b7b5f-3f1f-49d7-8895-6a98ad3c0a55/transcript.txt",
-  "analysis": "{...}",
-  "agent_errors": [
-    {
-      "timestamp": "2026-08-10T12:00:00+00:00",
-      "component": "app.agents.interview.services.audio.stt_service",
-      "type": "ExternalServiceError",
-      "message": "Speech service request failed"
-    }
-  ]
-}
-```
-
-For failures before a final analysis can be created (for example, bot join
-failure, candidate no-show, or a fatal task error), the final payload uses
-`interview_completed` instead:
-
-```json
-{
-  "event": "interview_completed",
-  "session_id": "8f2b7b5f-3f1f-49d7-8895-6a98ad3c0a55",
-  "status": "error_join_failed",
-  "agent_errors": [
-    {
-      "timestamp": "2026-08-10T12:00:00+00:00",
-      "component": "meet_session",
-      "type": "BotJoinError",
-      "message": "Bot join failed"
-    }
-  ]
-}
-```
-
-Each error has a UTC timestamp, component, type, and message. Messages are
-limited to 2,000 characters and stack traces are not included. In dict-based
-analysis reports, the same information is also available at
-`metadata.agent_errors` and `metadata.agent_error_count`.
+Actionabl polls `GET /api/v1/interview/analysis/{buss_id}`. It receives `202`
+while the interview is active and `200` with the full final analysis, agent
+errors, and terminal reason after a terminal result. An `interrupted` result
+with `backend_shutdown` or `backend_restarted` requires Actionabl to schedule a
+replacement with a new unique `buss_id`. See the Interview Agent API reference
+for the response shape and PostgreSQL setup steps.
 
 ### Linux Audio Recovery
 

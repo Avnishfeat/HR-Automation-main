@@ -52,10 +52,10 @@ def cleanup_expired_session_data(retention_days: Optional[int] = None) -> dict[s
     """
     if retention_days is None:
         try:
-            retention_days = max(0, int(os.getenv("INTERVIEW_SESSION_RETENTION_DAYS", "30")))
+            retention_days = max(0, int(os.getenv("INTERVIEW_SESSION_RETENTION_DAYS", "90")))
         except ValueError:
-            retention_days = 30
-            logger.warning("Invalid INTERVIEW_SESSION_RETENTION_DAYS; using 30 days")
+            retention_days = 90
+            logger.warning("Invalid INTERVIEW_SESSION_RETENTION_DAYS; using 90 days")
 
     root = Path(StoragePaths.DATA_ROOT).resolve()
     summary = {"session_directories_deleted": 0, "skipped": 0}
