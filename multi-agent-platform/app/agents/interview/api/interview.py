@@ -10,8 +10,13 @@ from fastapi.responses import JSONResponse
 
 from app.agents.interview.core.startup import get_services
 from app.agents.interview.core.background import start_and_conduct_interview_task
-from app.agents.interview.core.task_registry import create_interview_task
-from app.agents.interview.core.task_registry import is_task_active
+from app.agents.interview.core.task_registry import (
+    clear_interview_task_operator_termination,
+    create_interview_task,
+    is_task_active,
+    mark_interview_task_operator_terminated,
+)
+from app.agents.interview.config.constants import TERMINAL_SESSION_STATUSES
 from app.agents.interview.database import (
     create_or_get_interview,
     delete_pending_interview,
@@ -28,14 +33,6 @@ from app.agents.interview.core.limiter import get_concurrency_limiter, RATE_LIMI
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-TERMINAL_INTERVIEW_STATUSES = {
-    "completed", "completed_no_analysis", "time_limit_reached", "interrupted",
-    "error_capacity_reached", "error_join_failed", "error_candidate_no_show",
-    "error_candidate_left", "error_multiple_participants", "error_analysis_empty",
-    "error_analysis_failed", "error_fatal_task", "terminated_liveness_fail",
-    "aborted_multiple_participants", "aborted_multiple_participants_timeout",
-}
-
 @router.post("/start-google-meet", status_code=202)
 @limiter.limit(RATE_LIMITS["start_interview"])
 async def start_google_meet_interview(
@@ -206,7 +203,7 @@ async def get_interview_analysis(buss_id: str):
         "agent_errors": interview.agent_errors or [],
         "completed_at": interview.completed_at.isoformat() if interview.completed_at else None,
     }
-    if interview.status not in TERMINAL_INTERVIEW_STATUSES:
+    if interview.status not in TERMINAL_SESSION_STATUSES:
         payload["retry_after_seconds"] = 15
         return JSONResponse(status_code=202, content=payload)
     return payload
@@ -240,7 +237,11 @@ async def end_interview(session_id: str):
         raise HTTPException(status_code=503, detail="Session manager unavailable")
     
     try:
+        # Mark before signalling the browser: its wait loop may immediately
+        # return false once the stop event is set.
+        mark_interview_task_operator_terminated(session_id)
         if not services.meet_session_mgr.request_session_stop(session_id):
+            clear_interview_task_operator_termination(session_id)
             raise HTTPException(status_code=404, detail="Session not found")
         return {"status": "ending", "session_id": session_id}
     except Exception as e:

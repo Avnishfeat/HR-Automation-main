@@ -221,3 +221,18 @@ class ResourceNotFoundError(InterviewBotException):
             details={"resource_type": resource_type, "resource_id": resource_id, **(details or {})},
             recoverable=False
         )
+
+
+class InterviewDeadlineExceeded(InterviewBotException):
+    """Raised when a bounded interview phase exceeds its allowed duration."""
+
+    def __init__(self, stage: str, reason: str):
+        super().__init__(
+            message=f"Interview deadline exceeded during {stage}: {reason}",
+            error_code="INTERVIEW_DEADLINE_EXCEEDED",
+            status_code=504,
+            details={"stage": stage, "reason": reason},
+            recoverable=True,
+        )
+        self.stage = stage
+        self.reason = reason

@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 _tasks: dict[str, asyncio.Task] = {}
 _shutdown_requested_session_ids: set[str] = set()
+_operator_termination_requested_session_ids: set[str] = set()
 
 
 def create_interview_task(session_id: str, work: Awaitable[None]) -> asyncio.Task:
@@ -24,6 +25,7 @@ def create_interview_task(session_id: str, work: Awaitable[None]) -> asyncio.Tas
     def _remove(completed: asyncio.Task) -> None:
         _tasks.pop(session_id, None)
         _shutdown_requested_session_ids.discard(session_id)
+        _operator_termination_requested_session_ids.discard(session_id)
         try:
             completed.result()
         except asyncio.CancelledError:
@@ -54,6 +56,21 @@ def mark_interview_tasks_shutting_down() -> None:
 def is_interview_shutdown_requested(session_id: str) -> bool:
     """Whether this process requested a controlled shutdown for a task."""
     return session_id in _shutdown_requested_session_ids
+
+
+def mark_interview_task_operator_terminated(session_id: str) -> None:
+    """Mark a task before its browser stop signal is sent by an operator."""
+    _operator_termination_requested_session_ids.add(session_id)
+
+
+def clear_interview_task_operator_termination(session_id: str) -> None:
+    """Remove a marker when the requested session was not actually active."""
+    _operator_termination_requested_session_ids.discard(session_id)
+
+
+def is_interview_operator_termination_requested(session_id: str) -> bool:
+    """Whether an operator requested a controlled end for this task."""
+    return session_id in _operator_termination_requested_session_ids
 
 
 async def drain_interview_tasks(timeout_seconds: float = 25.0) -> None:

@@ -14,7 +14,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from app.agents.interview.config.constants import InterruptionReason, SessionStatus
+from app.agents.interview.config.constants import (
+    InterruptionReason,
+    SessionStatus,
+    TERMINAL_SESSION_STATUSES,
+)
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -239,7 +243,12 @@ async def complete_interview(
         interview.agent_errors = agent_errors
         interview.completed_at = now
         interview.updated_at = now
-        event_type = "interrupted" if status == "interrupted" else "completed"
+        if status == SessionStatus.INTERRUPTED:
+            event_type = "interrupted"
+        elif status == SessionStatus.CANCELLED:
+            event_type = "cancelled"
+        else:
+            event_type = "completed"
         event_details = {"has_analysis": analysis is not None}
         if resolved_reason:
             event_details["reason"] = resolved_reason
@@ -294,17 +303,10 @@ async def cleanup_expired_interviews(retention_days: Optional[int] = None) -> di
         retention_days = settings.INTERVIEW_RECORD_RETENTION_DAYS
     retention_days = max(0, retention_days)
     cutoff = _utcnow() - timedelta(days=retention_days)
-    terminal_statuses = (
-        "completed", "completed_no_analysis", "time_limit_reached", "interrupted",
-        "error_capacity_reached", "error_join_failed", "error_candidate_no_show",
-        "error_candidate_left", "error_multiple_participants", "error_analysis_empty",
-        "error_analysis_failed", "error_fatal_task", "terminated_liveness_fail",
-        "aborted_multiple_participants", "aborted_multiple_participants_timeout",
-    )
     async with database_session() as session, session.begin():
         result = await session.execute(
             delete(Interview).where(
-                Interview.status.in_(terminal_statuses),
+                Interview.status.in_(TERMINAL_SESSION_STATUSES),
                 Interview.completed_at.is_not(None),
                 Interview.completed_at <= cutoff,
             )

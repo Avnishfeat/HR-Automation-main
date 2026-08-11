@@ -19,19 +19,21 @@ router = APIRouter()
 @router.get("/health")
 async def health_check():
     services = get_services()
-    
+    database_ok = await database_is_healthy()
+
     is_healthy = all([
         services.interview_service,
         services.meet_session_mgr,
         services.combined_analyzer,
         services.stt_service,
-        services.tts_service
+        services.tts_service,
+        database_ok,
     ])
     
     return {
         "status": "healthy" if is_healthy else "degraded",
         "active_interview_tasks": active_task_count(),
-        "database": "operational" if await database_is_healthy() else "error",
+        "database": "operational" if database_ok else "error",
     }
 
 @router.get("/health/detailed", status_code=status.HTTP_200_OK)

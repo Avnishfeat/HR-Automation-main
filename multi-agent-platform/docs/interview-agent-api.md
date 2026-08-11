@@ -133,7 +133,8 @@ POST /{session_id}/end
 ```
 
 Requests a graceful stop. The interview task performs its normal cleanup and
-persists its terminal result for analysis retrieval.
+persists a terminal cancellation for analysis retrieval. The final polling
+result is `cancelled` with `terminal_reason: "operator_terminated"`.
 
 Example:
 
@@ -196,6 +197,23 @@ retains the original interrupted record as audit history:
 The Interview Agent does not automatically rejoin a Meet, send a webhook, or
 notify the candidate or operator for either condition.
 
+### Operator termination
+
+An authorized operator can request `POST /{session_id}/end`. When the task
+finishes cleanup, polling returns `200 OK` with:
+
+```json
+{
+  "status": "cancelled",
+  "terminal_reason": "operator_terminated"
+}
+```
+
+Actionabl treats this as final audit history and does not create a replacement
+interview automatically. If speech was captured before the operator stopped the
+interview, the terminal response can include partial analysis; otherwise
+`analysis` is `null`.
+
 ## Operational Health
 
 ```http
@@ -212,6 +230,21 @@ The deployment is deliberately limited to one concurrent interview by default
 (`MAX_CONCURRENT_INTERVIEWS=1`), because Chrome's persistent profile and the
 virtual audio routing are process-wide resources. Run one application worker
 per VM until browser profiles and audio devices are made session-isolated.
+
+## Interview Deadlines
+
+The agent applies configurable outer deadlines so a stalled dependency cannot
+leave Actionabl polling indefinitely. A deadline returns a terminal error with
+one of these `terminal_reason` values: `browser_join_timeout`,
+`candidate_wait_timeout`, `stt_turn_timeout`, `llm_generation_timeout`,
+`tts_playback_timeout`, `analysis_timeout`, or `cleanup_timeout`.
+
+Set the corresponding environment variables to adjust them:
+`INTERVIEW_BROWSER_JOIN_TIMEOUT_SEC`,
+`INTERVIEW_CANDIDATE_WAIT_TIMEOUT_SEC`, `INTERVIEW_STT_TURN_TIMEOUT_SEC`,
+`INTERVIEW_LLM_GENERATION_TIMEOUT_SEC`,
+`INTERVIEW_TTS_PLAYBACK_TIMEOUT_SEC`, `INTERVIEW_ANALYSIS_TIMEOUT_SEC`, and
+`INTERVIEW_CLEANUP_TIMEOUT_SEC`.
 
 ## TTS Model
 

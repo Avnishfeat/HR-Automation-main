@@ -27,11 +27,12 @@ from .integrity_handler import IntegrityHandler
 
 # Config
 from app.agents.interview.config.constants import (
-    ErrorMessages, InterviewTiming, SessionStatus, TerminationReason, 
+    ErrorMessages, FailureReason, InterviewTiming, SessionStatus, TerminationReason,
     StaticMessages, ParticipantThresholds
 )
 from app.agents.interview.utils.audio_file_utils import get_user_audio_path_for_stt
-from app.core.exceptions import ExternalServiceError
+from app.core.config import settings
+from app.core.exceptions import ExternalServiceError, InterviewDeadlineExceeded
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,7 @@ class MeetInterviewOrchestrator:
         transcript_log = []
         session = None
         terminal_status = SessionStatus.COMPLETED
+        terminal_reason = None
         
         try:
             # Get session with ThreadSafe Proxy
@@ -153,6 +155,12 @@ class MeetInterviewOrchestrator:
                 logger.info("--- Phase: CONCLUSION ---")
                 await self._run_conclusion(session, state)
 
+        except InterviewDeadlineExceeded as error:
+            logger.error("Interview deadline exceeded: %s", error)
+            terminal_status = SessionStatus.ERROR_FATAL_TASK
+            terminal_reason = error.reason
+            if session and session.stop_event:
+                session.stop_event.set()
         except Exception as e:
             logger.error(f"Fatal error in orchestration: {e}", exc_info=True)
             terminal_status = SessionStatus.ERROR_FATAL_TASK
@@ -162,7 +170,9 @@ class MeetInterviewOrchestrator:
             await self._run_cleanup(session, state)
             self.state_mgr.advance_phase(state, InterviewPhase.COMPLETED)
         
-        return self._build_final_response(session_id, state, transcript_log, terminal_status)
+        return self._build_final_response(
+            session_id, state, transcript_log, terminal_status, terminal_reason
+        )
 
     # =========================================================================
     # PARTICIPANT MONITORING
@@ -438,30 +448,46 @@ class MeetInterviewOrchestrator:
 
     async def _ask_question(self, session: InterviewSession, turn_count: int) -> Tuple[bool, int, float]:
         start_ts = time.time()
-        gemini_task = asyncio.create_task(asyncio.to_thread(
-            self.interview_svc.stream_interview_turn, session.session_id, turn_count
-        ))
-        
         await session.meet.enable_microphone()
-        await asyncio.sleep(InterviewTiming.MIC_TOGGLE_DELAY_SEC)
-        
-        audio_stream = await gemini_task
-        duration = time.time() - start_ts
-        
-        if not audio_stream: 
-            return False, turn_count + 1, duration
+        try:
+            await asyncio.sleep(InterviewTiming.MIC_TOGGLE_DELAY_SEC)
+            try:
+                audio_stream = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self.interview_svc.stream_interview_turn, session.session_id, turn_count
+                    ),
+                    timeout=max(1, settings.INTERVIEW_LLM_GENERATION_TIMEOUT_SEC),
+                )
+            except asyncio.TimeoutError as error:
+                raise InterviewDeadlineExceeded(
+                    "llm_generation", FailureReason.LLM_GENERATION_TIMEOUT
+                ) from error
 
-        logger.debug("Starting audio playback...")
-        success = await asyncio.to_thread(
-            self.audio_handler.play_audio_stream, audio_stream, session.meet, session.stop_event
-        )
-        
-        # FIX: Wait for virtual cable to drain into Google Meet before
-        # disabling the mic so the candidate's response isn't cut off.
-        await asyncio.sleep(1.5)
-        await session.meet.disable_microphone()
-        
-        return success, turn_count + 1, duration
+            duration = time.time() - start_ts
+            if not audio_stream:
+                return False, turn_count + 1, duration
+
+            logger.debug("Starting audio playback...")
+            try:
+                success = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self.audio_handler.play_audio_stream,
+                        audio_stream,
+                        session.meet,
+                        session.stop_event,
+                    ),
+                    timeout=max(1, settings.INTERVIEW_TTS_PLAYBACK_TIMEOUT_SEC),
+                )
+            except asyncio.TimeoutError as error:
+                raise InterviewDeadlineExceeded(
+                    "tts_playback", FailureReason.TTS_PLAYBACK_TIMEOUT
+                ) from error
+
+            # Let the virtual cable drain into Google Meet before muting.
+            await asyncio.sleep(1.5)
+            return success, turn_count + 1, duration
+        finally:
+            await session.meet.disable_microphone()
 
     async def _handle_generation_delay_or_failure(
         self, session: InterviewSession, state: InterviewState, duration: float, success: bool
@@ -484,10 +510,18 @@ class MeetInterviewOrchestrator:
         def on_interim(text):
             self.interview_svc.transcript_manager.update_pending_transcript(session.session_id, text)
         
-        start_time, transcript = await self.stt_service._record_and_process_stt_streaming(
-            session.session_id, turn_count, is_follow_up,
-            on_interim_transcript=on_interim
-        )
+        try:
+            start_time, transcript = await asyncio.wait_for(
+                self.stt_service._record_and_process_stt_streaming(
+                    session.session_id,
+                    turn_count,
+                    is_follow_up,
+                    on_interim_transcript=on_interim,
+                ),
+                timeout=max(1, settings.INTERVIEW_STT_TURN_TIMEOUT_SEC),
+            )
+        except asyncio.TimeoutError as error:
+            raise InterviewDeadlineExceeded("stt_turn", FailureReason.STT_TURN_TIMEOUT) from error
         if transcript == "[Error]":
             if session.stop_event.is_set():
                 # A participant departure can interrupt a retry recording. It
@@ -530,11 +564,21 @@ class MeetInterviewOrchestrator:
         await session.meet.enable_microphone()
         await asyncio.sleep(InterviewTiming.MIC_TOGGLE_DELAY_SEC)
         
-        success = await asyncio.to_thread(self.audio_handler.play_wav_file, path, session.meet, session.stop_event)
-        
-        await asyncio.sleep(1.5)  # Drain virtual cable before disabling mic
-        await session.meet.disable_microphone()
-        return success
+        try:
+            success = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self.audio_handler.play_wav_file, path, session.meet, session.stop_event
+                ),
+                timeout=max(1, settings.INTERVIEW_TTS_PLAYBACK_TIMEOUT_SEC),
+            )
+            await asyncio.sleep(1.5)  # Drain virtual cable before disabling mic
+            return success
+        except asyncio.TimeoutError as error:
+            raise InterviewDeadlineExceeded(
+                "tts_playback", FailureReason.TTS_PLAYBACK_TIMEOUT
+            ) from error
+        finally:
+            await session.meet.disable_microphone()
 
     def _get_interview_session(self, session_id: str) -> InterviewSession:
         session_data = self.session_mgr.get_session(session_id)
@@ -689,13 +733,17 @@ class MeetInterviewOrchestrator:
         if concurrency_limiter:
             concurrency_limiter.heartbeat(session_id)
         
-    def _build_final_response(self, session_id, state, logs, status=SessionStatus.COMPLETED):
+    def _build_final_response(
+        self, session_id, state, logs, status=SessionStatus.COMPLETED, terminal_reason=None
+    ):
         final_response = {
             "status": status,
             "session_id": session_id,
             "questions_asked": state.questions_asked_count,
             "final_transcript_summary": logs
         }
+        if terminal_reason:
+            final_response["terminal_reason"] = terminal_reason
         session_data = self.session_mgr.get_session(session_id) or {}
         monitor = session_data.get("participant_monitor")
         if monitor:

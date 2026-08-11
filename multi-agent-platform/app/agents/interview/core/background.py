@@ -5,12 +5,22 @@ import time
 from typing import Optional
 from pathlib import Path
 
-from app.agents.interview.config.constants import BrowserConfig, InterruptionReason, SessionStatus
+from app.agents.interview.config.constants import (
+    BrowserConfig,
+    FailureReason,
+    InterruptionReason,
+    SessionStatus,
+    TerminationReason,
+)
 from app.agents.interview.core.limiter import get_concurrency_limiter
 from app.agents.interview.core.local_state import save_terminal_status
-from app.agents.interview.core.task_registry import is_interview_shutdown_requested
+from app.agents.interview.core.task_registry import (
+    is_interview_operator_termination_requested,
+    is_interview_shutdown_requested,
+)
 from app.agents.interview.database import complete_interview, update_interview_status
 from app.agents.interview.core.startup import get_services
+from app.core.config import settings
 from app.agents.interview.core.session_error_tracker import (
     clear_session_errors,
     get_session_errors,
@@ -22,6 +32,14 @@ from app.agents.interview.core.session_error_tracker import (
 
 logger = logging.getLogger(__name__)
 
+
+def _operator_termination_status(session_id: str) -> tuple[Optional[str], Optional[str]]:
+    """Return the terminal lifecycle values for an operator-requested stop."""
+    if is_interview_operator_termination_requested(session_id):
+        return SessionStatus.CANCELLED, TerminationReason.OPERATOR_TERMINATED
+    return None, None
+
+
 async def run_analysis_in_thread(target_func, args_tuple, results_dict, key_name):
     """Runs a target synchronous function in an asyncio thread and stores result/error in dict"""
     try:
@@ -32,6 +50,10 @@ async def run_analysis_in_thread(target_func, args_tuple, results_dict, key_name
     except Exception as e:
         logger.error(f"Error in analysis task '{key_name}': {e}", exc_info=True)
         results_dict[key_name] = None
+
+
+def _deadline_seconds(value: int) -> int:
+    return max(1, value)
 
 async def start_and_conduct_interview_task(
     session_id: str,
@@ -75,16 +97,31 @@ async def start_and_conduct_interview_task(
         await update_interview_status(session_id, "joining")
 
         # 1. Start Bot (Async)
-        success = await meet_session_mgr.start_bot_session(
-            session_id=session_id,
-            meet_link=meet_link,
-            audio_device=audio_device,
-            enable_video=enable_video,
-            headless=BrowserConfig.HEADLESS,
-            video_capture_method=video_capture_method
-        )
+        try:
+            success = await asyncio.wait_for(
+                meet_session_mgr.start_bot_session(
+                    session_id=session_id,
+                    meet_link=meet_link,
+                    audio_device=audio_device,
+                    enable_video=enable_video,
+                    headless=BrowserConfig.HEADLESS,
+                    video_capture_method=video_capture_method,
+                ),
+                timeout=_deadline_seconds(settings.INTERVIEW_BROWSER_JOIN_TIMEOUT_SEC),
+            )
+        except asyncio.TimeoutError:
+            completion_status = SessionStatus.ERROR_JOIN_FAILED
+            terminal_reason = FailureReason.BROWSER_JOIN_TIMEOUT
+            record_session_error(
+                session_id, "meet_session", "Browser join deadline exceeded", "BrowserJoinTimeout"
+            )
+            return
         if not success:
-            if is_interview_shutdown_requested(session_id):
+            operator_status, operator_reason = _operator_termination_status(session_id)
+            if operator_status:
+                completion_status = operator_status
+                terminal_reason = operator_reason
+            elif is_interview_shutdown_requested(session_id):
                 completion_status = SessionStatus.INTERRUPTED
                 terminal_reason = InterruptionReason.BACKEND_SHUTDOWN
             else:
@@ -93,9 +130,27 @@ async def start_and_conduct_interview_task(
             return
 
         # Wait for candidate (Async)
-        candidate_joined = await meet_session_mgr.wait_for_candidate(session_id)
+        try:
+            candidate_joined = await asyncio.wait_for(
+                meet_session_mgr.wait_for_candidate(session_id),
+                timeout=_deadline_seconds(settings.INTERVIEW_CANDIDATE_WAIT_TIMEOUT_SEC),
+            )
+        except asyncio.TimeoutError:
+            completion_status = SessionStatus.ERROR_CANDIDATE_NO_SHOW
+            terminal_reason = FailureReason.CANDIDATE_WAIT_TIMEOUT
+            record_session_error(
+                session_id,
+                "participant_monitor",
+                "Candidate wait deadline exceeded",
+                "CandidateWaitTimeout",
+            )
+            return
         if not candidate_joined:
-            if is_interview_shutdown_requested(session_id):
+            operator_status, operator_reason = _operator_termination_status(session_id)
+            if operator_status:
+                completion_status = operator_status
+                terminal_reason = operator_reason
+            elif is_interview_shutdown_requested(session_id):
                 completion_status = SessionStatus.INTERRUPTED
                 terminal_reason = InterruptionReason.BACKEND_SHUTDOWN
             else:
@@ -128,13 +183,18 @@ async def start_and_conduct_interview_task(
         if isinstance(orchestration_result, dict):
             orchestration_status = orchestration_result.get("status")
             completion_status = orchestration_status or SessionStatus.ERROR_FATAL_TASK
+            terminal_reason = orchestration_result.get("terminal_reason")
             if orchestration_status and orchestration_status != SessionStatus.COMPLETED:
                 ended_early = True
         else:
             completion_status = SessionStatus.ERROR_FATAL_TASK
             ended_early = True # Fallback if we didn't get a proper dict
 
-        if is_interview_shutdown_requested(session_id):
+        operator_status, operator_reason = _operator_termination_status(session_id)
+        if operator_status:
+            completion_status = operator_status
+            terminal_reason = operator_reason
+        elif is_interview_shutdown_requested(session_id):
             completion_status = SessionStatus.INTERRUPTED
             terminal_reason = InterruptionReason.BACKEND_SHUTDOWN
 
@@ -148,8 +208,18 @@ async def start_and_conduct_interview_task(
             interview_service.finalize_interview_session(session_id)
 
         if meet_session_mgr:
-            await meet_session_mgr.end_session(session_id)
-            session_closed = True
+            try:
+                await asyncio.wait_for(
+                    meet_session_mgr.end_session(session_id),
+                    timeout=_deadline_seconds(settings.INTERVIEW_CLEANUP_TIMEOUT_SEC),
+                )
+                session_closed = True
+            except asyncio.TimeoutError:
+                completion_status = SessionStatus.ERROR_FATAL_TASK
+                terminal_reason = FailureReason.CLEANUP_TIMEOUT
+                record_session_error(
+                    session_id, "session_cleanup", "Browser cleanup deadline exceeded", "CleanupTimeout"
+                )
 
         # 4. Trigger Analysis (Single Call)
         await update_interview_status(session_id, "analyzing")
@@ -181,7 +251,17 @@ async def start_and_conduct_interview_task(
             )
         ]
 
-        await asyncio.gather(*analysis_tasks)
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*analysis_tasks),
+                timeout=_deadline_seconds(settings.INTERVIEW_ANALYSIS_TIMEOUT_SEC),
+            )
+        except asyncio.TimeoutError:
+            completion_status = SessionStatus.ERROR_ANALYSIS_FAILED
+            terminal_reason = FailureReason.ANALYSIS_TIMEOUT
+            record_session_error(
+                session_id, "analysis", "Final analysis deadline exceeded", "AnalysisTimeout"
+            )
 
         # 5. Build the final report. Delivery is database retrieval only; no
         # outbound webhook is sent after this point.
@@ -215,15 +295,28 @@ async def start_and_conduct_interview_task(
         raise
     except Exception as e:
         logger.error(f"FATAL ERROR: {e}", exc_info=True)
-        if is_interview_shutdown_requested(session_id):
+        operator_status, operator_reason = _operator_termination_status(session_id)
+        if operator_status:
+            completion_status = operator_status
+            terminal_reason = operator_reason
+        elif is_interview_shutdown_requested(session_id):
             completion_status = SessionStatus.INTERRUPTED
             terminal_reason = InterruptionReason.BACKEND_SHUTDOWN
         else:
             completion_status = SessionStatus.ERROR_FATAL_TASK
     finally:
+        cleanup_timed_out = False
         if interview_service and not interview_state_closed:
             try:
-                interview_service.end_interview_session(session_id)
+                await asyncio.wait_for(
+                    asyncio.to_thread(interview_service.end_interview_session, session_id),
+                    timeout=_deadline_seconds(settings.INTERVIEW_CLEANUP_TIMEOUT_SEC),
+                )
+            except asyncio.TimeoutError:
+                cleanup_timed_out = True
+                record_session_error(
+                    session_id, "session_cleanup", "Interview-state cleanup deadline exceeded", "CleanupTimeout"
+                )
             except Exception as e:
                 logger.warning(f"Interview service cleanup failed for {session_id}: {e}")
         elif interview_service and not interview_memory_cleaned:
@@ -232,10 +325,22 @@ async def start_and_conduct_interview_task(
             except Exception as e:
                 logger.warning(f"Interview service memory cleanup failed for {session_id}: {e}")
         if meet_session_mgr and not session_closed:
-            await meet_session_mgr.end_session(session_id)
+            try:
+                await asyncio.wait_for(
+                    meet_session_mgr.end_session(session_id),
+                    timeout=_deadline_seconds(settings.INTERVIEW_CLEANUP_TIMEOUT_SEC),
+                )
+            except asyncio.TimeoutError:
+                cleanup_timed_out = True
+                record_session_error(
+                    session_id, "session_cleanup", "Browser cleanup deadline exceeded", "CleanupTimeout"
+                )
         if concurrency_limiter and not concurrency_released:
             concurrency_limiter.release(session_id)
         terminal_status = completion_status or SessionStatus.ERROR_FATAL_TASK
+        if cleanup_timed_out and terminal_status == SessionStatus.COMPLETED:
+            terminal_status = SessionStatus.ERROR_FATAL_TASK
+            terminal_reason = FailureReason.CLEANUP_TIMEOUT
         try:
             session_errors = get_session_errors(session_id)
             final_report = _attach_agent_errors(final_report, session_errors) if final_report else None

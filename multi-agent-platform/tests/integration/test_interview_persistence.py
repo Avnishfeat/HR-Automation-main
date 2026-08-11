@@ -10,21 +10,27 @@ from __future__ import annotations
 import json
 import os
 import asyncio
+import threading
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+import httpx
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from app.agents.interview.api import interview as interview_api
+from app.agents.interview.api import health as health_api
 from app.agents.interview.api.interview import get_interview_analysis
 from app.agents.interview.core import background
 from app.agents.interview.core.task_registry import (
     create_interview_task,
+    is_interview_operator_termination_requested,
     mark_interview_tasks_shutting_down,
 )
 from app.agents.interview.database import (
@@ -131,6 +137,31 @@ async def test_pending_analysis_returns_202_with_polling_interval(postgres_datab
         "completed_at": None,
         "retry_after_seconds": 15,
     }
+
+
+@pytest.mark.asyncio
+async def test_analysis_polling_route_returns_202_then_terminal_200(postgres_database):
+    interview, _ = await _create_interview(buss_id="BUSS-HTTP-POLLING")
+    app = FastAPI()
+    app.include_router(interview_api.router, prefix="/api/v1/interview")
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        pending_response = await client.get(f"/api/v1/interview/analysis/{interview.buss_id}")
+        assert pending_response.status_code == 202
+        assert pending_response.json()["terminal_reason"] is None
+
+        await complete_interview(
+            interview.session_id,
+            "completed",
+            {"recommendation": "hire"},
+            [],
+        )
+        completed_response = await client.get(f"/api/v1/interview/analysis/{interview.buss_id}")
+
+    assert completed_response.status_code == 200
+    assert completed_response.json()["status"] == "completed"
+    assert completed_response.json()["terminal_reason"] is None
 
 
 @pytest.mark.asyncio
@@ -320,29 +351,320 @@ async def test_shutdown_stop_signal_is_not_reported_as_candidate_no_show(postgre
 
 
 @pytest.mark.asyncio
+async def test_operator_stop_before_candidate_join_is_cancelled(postgres_database, monkeypatch):
+    interview, _ = await _create_interview(buss_id="BUSS-OPERATOR-STOP-BEFORE-JOIN")
+    candidate_wait = asyncio.Event()
+
+    async def wait_for_candidate(_session_id: str) -> bool:
+        await candidate_wait.wait()
+        return False
+
+    def request_session_stop(_session_id: str) -> bool:
+        candidate_wait.set()
+        return True
+
+    meet_session_manager = SimpleNamespace(
+        start_bot_session=AsyncMock(return_value=True),
+        wait_for_candidate=AsyncMock(side_effect=wait_for_candidate),
+        request_session_stop=MagicMock(side_effect=request_session_stop),
+        end_session=AsyncMock(),
+    )
+    interview_service = SimpleNamespace(
+        get_candidate_name=MagicMock(return_value="Test Candidate"),
+        end_interview_session=MagicMock(),
+        cleanup_session_state=MagicMock(),
+    )
+    services = SimpleNamespace(
+        meet_session_mgr=meet_session_manager,
+        meet_orchestrator=None,
+        combined_analyzer=None,
+        interview_service=interview_service,
+    )
+    monkeypatch.setattr(background, "get_services", lambda: services)
+    monkeypatch.setattr(interview_api, "get_services", lambda: services)
+    monkeypatch.setattr(background, "get_concurrency_limiter", lambda: None)
+    monkeypatch.setattr(background, "save_terminal_status", MagicMock())
+
+    task = create_interview_task(
+        interview.session_id,
+        background.start_and_conduct_interview_task(
+            session_id=interview.session_id,
+            meet_link="https://meet.google.com/test-interview",
+            candidate_email=interview.candidate_email,
+            buss_id=interview.buss_id,
+        ),
+    )
+    for _ in range(50):
+        current = await get_interview_by_buss_id(interview.buss_id)
+        if current and current.status == "joining":
+            break
+        await asyncio.sleep(0)
+    else:
+        pytest.fail("Interview task did not reach joining state")
+
+    response = await interview_api.end_interview(interview.session_id)
+    assert response == {"status": "ending", "session_id": interview.session_id}
+    await task
+
+    cancelled = await get_interview_by_buss_id(interview.buss_id)
+    assert cancelled is not None
+    assert cancelled.status == "cancelled"
+    assert cancelled.terminal_reason == "operator_terminated"
+    assert cancelled.analysis_json is None
+
+    async with database_session() as session:
+        event = await session.scalar(
+            select(InterviewEvent)
+            .where(InterviewEvent.session_id == interview.session_id)
+            .order_by(InterviewEvent.id.desc())
+        )
+    assert event is not None
+    assert event.event_type == "cancelled"
+    assert event.details == {"has_analysis": False, "reason": "operator_terminated"}
+
+    payload = await get_interview_analysis(interview.buss_id)
+    assert isinstance(payload, dict)
+    assert payload["status"] == "cancelled"
+    assert payload["terminal_reason"] == "operator_terminated"
+    assert payload["analysis"] is None
+
+
+@pytest.mark.asyncio
+async def test_operator_stop_during_interview_returns_partial_analysis(postgres_database, monkeypatch):
+    interview, _ = await _create_interview(buss_id="BUSS-OPERATOR-STOP-DURING-INTERVIEW")
+    stop_orchestration = asyncio.Event()
+
+    async def conduct_interview(*, session_id: str) -> dict:
+        assert session_id == interview.session_id
+        await stop_orchestration.wait()
+        return {"status": "stop_requested"}
+
+    def request_session_stop(_session_id: str) -> bool:
+        stop_orchestration.set()
+        return True
+
+    meet_session_manager = SimpleNamespace(
+        start_bot_session=AsyncMock(return_value=True),
+        wait_for_candidate=AsyncMock(return_value=True),
+        request_session_stop=MagicMock(side_effect=request_session_stop),
+        _start_candidate_video_capture=MagicMock(),
+        get_snapshot_count=MagicMock(return_value=0),
+        get_background_person_count=MagicMock(return_value=0),
+        get_reconnection_count=MagicMock(return_value=0),
+        end_session=AsyncMock(),
+    )
+    interview_service = SimpleNamespace(
+        get_candidate_name=MagicMock(return_value="Test Candidate"),
+        finalize_interview_session=MagicMock(),
+        end_interview_session=MagicMock(),
+        cleanup_session_state=MagicMock(),
+    )
+    services = SimpleNamespace(
+        meet_session_mgr=meet_session_manager,
+        meet_orchestrator=SimpleNamespace(conduct_interview=AsyncMock(side_effect=conduct_interview)),
+        combined_analyzer=SimpleNamespace(
+            generate_final_report=MagicMock(return_value={"summary": "partial interview"})
+        ),
+        interview_service=interview_service,
+    )
+    monkeypatch.setattr(background, "get_services", lambda: services)
+    monkeypatch.setattr(interview_api, "get_services", lambda: services)
+    monkeypatch.setattr(background, "get_concurrency_limiter", lambda: None)
+    monkeypatch.setattr(background, "save_terminal_status", MagicMock())
+
+    task = create_interview_task(
+        interview.session_id,
+        background.start_and_conduct_interview_task(
+            session_id=interview.session_id,
+            meet_link="https://meet.google.com/test-interview",
+            candidate_email=interview.candidate_email,
+            buss_id=interview.buss_id,
+        ),
+    )
+    for _ in range(50):
+        current = await get_interview_by_buss_id(interview.buss_id)
+        if current and current.status == "interviewing":
+            break
+        await asyncio.sleep(0)
+    else:
+        pytest.fail("Interview task did not reach interviewing state")
+
+    await interview_api.end_interview(interview.session_id)
+    await task
+
+    payload = await get_interview_analysis(interview.buss_id)
+    assert isinstance(payload, dict)
+    assert payload["status"] == "cancelled"
+    assert payload["terminal_reason"] == "operator_terminated"
+    assert payload["analysis"]["summary"] == "partial interview"
+
+
+@pytest.mark.asyncio
+async def test_operator_stop_not_found_clears_termination_marker(monkeypatch):
+    session_id = str(uuid4())
+    services = SimpleNamespace(
+        meet_session_mgr=SimpleNamespace(request_session_stop=MagicMock(return_value=False))
+    )
+    monkeypatch.setattr(interview_api, "get_services", lambda: services)
+
+    with pytest.raises(HTTPException) as error:
+        await interview_api.end_interview(session_id)
+
+    assert error.value.status_code == 404
+    assert not is_interview_operator_termination_requested(session_id)
+
+
+@pytest.mark.asyncio
+async def test_basic_health_is_degraded_when_database_is_unavailable(monkeypatch):
+    services = SimpleNamespace(
+        interview_service=object(),
+        meet_session_mgr=object(),
+        combined_analyzer=object(),
+        stt_service=object(),
+        tts_service=object(),
+    )
+
+    async def database_down() -> bool:
+        return False
+
+    monkeypatch.setattr(health_api, "get_services", lambda: services)
+    monkeypatch.setattr(health_api, "database_is_healthy", database_down)
+
+    payload = await health_api.health_check()
+    assert payload == {
+        "status": "degraded",
+        "active_interview_tasks": 0,
+        "database": "error",
+    }
+
+
+@pytest.mark.asyncio
+async def test_browser_join_deadline_persists_truthful_terminal_reason(postgres_database, monkeypatch):
+    interview, _ = await _create_interview(buss_id="BUSS-BROWSER-JOIN-DEADLINE")
+    never_complete = asyncio.Event()
+
+    async def start_bot_session(**_kwargs) -> bool:
+        await never_complete.wait()
+        return True
+
+    meet_session_manager = SimpleNamespace(
+        start_bot_session=AsyncMock(side_effect=start_bot_session),
+        end_session=AsyncMock(),
+    )
+    interview_service = SimpleNamespace(
+        get_candidate_name=MagicMock(return_value="Test Candidate"),
+        end_interview_session=MagicMock(),
+        cleanup_session_state=MagicMock(),
+    )
+    services = SimpleNamespace(
+        meet_session_mgr=meet_session_manager,
+        meet_orchestrator=None,
+        combined_analyzer=None,
+        interview_service=interview_service,
+    )
+    monkeypatch.setattr(background, "get_services", lambda: services)
+    monkeypatch.setattr(background, "get_concurrency_limiter", lambda: None)
+    monkeypatch.setattr(background, "save_terminal_status", MagicMock())
+    monkeypatch.setattr(settings, "INTERVIEW_BROWSER_JOIN_TIMEOUT_SEC", 1)
+
+    await background.start_and_conduct_interview_task(
+        session_id=interview.session_id,
+        meet_link="https://meet.google.com/test-interview",
+        candidate_email=interview.candidate_email,
+        buss_id=interview.buss_id,
+    )
+
+    payload = await get_interview_analysis(interview.buss_id)
+    assert isinstance(payload, dict)
+    assert payload["status"] == "error_join_failed"
+    assert payload["terminal_reason"] == "browser_join_timeout"
+
+
+@pytest.mark.asyncio
+async def test_analysis_deadline_persists_truthful_terminal_reason(postgres_database, monkeypatch):
+    interview, _ = await _create_interview(buss_id="BUSS-ANALYSIS-DEADLINE")
+    release_analysis = threading.Event()
+
+    def slow_analysis(*_args) -> dict:
+        release_analysis.wait(timeout=5)
+        return {"summary": "late analysis"}
+
+    meet_session_manager = SimpleNamespace(
+        start_bot_session=AsyncMock(return_value=True),
+        wait_for_candidate=AsyncMock(return_value=True),
+        _start_candidate_video_capture=MagicMock(),
+        get_snapshot_count=MagicMock(return_value=0),
+        get_background_person_count=MagicMock(return_value=0),
+        get_reconnection_count=MagicMock(return_value=0),
+        end_session=AsyncMock(),
+    )
+    interview_service = SimpleNamespace(
+        get_candidate_name=MagicMock(return_value="Test Candidate"),
+        finalize_interview_session=MagicMock(),
+        end_interview_session=MagicMock(),
+        cleanup_session_state=MagicMock(),
+    )
+    services = SimpleNamespace(
+        meet_session_mgr=meet_session_manager,
+        meet_orchestrator=SimpleNamespace(
+            conduct_interview=AsyncMock(return_value={"status": "completed"})
+        ),
+        combined_analyzer=SimpleNamespace(generate_final_report=MagicMock(side_effect=slow_analysis)),
+        interview_service=interview_service,
+    )
+    monkeypatch.setattr(background, "get_services", lambda: services)
+    monkeypatch.setattr(background, "get_concurrency_limiter", lambda: None)
+    monkeypatch.setattr(background, "save_terminal_status", MagicMock())
+    monkeypatch.setattr(settings, "INTERVIEW_ANALYSIS_TIMEOUT_SEC", 1)
+
+    try:
+        await background.start_and_conduct_interview_task(
+            session_id=interview.session_id,
+            meet_link="https://meet.google.com/test-interview",
+            candidate_email=interview.candidate_email,
+            buss_id=interview.buss_id,
+        )
+    finally:
+        release_analysis.set()
+
+    payload = await get_interview_analysis(interview.buss_id)
+    assert isinstance(payload, dict)
+    assert payload["status"] == "error_analysis_failed"
+    assert payload["terminal_reason"] == "analysis_timeout"
+
+
+@pytest.mark.asyncio
 async def test_retention_removes_only_old_terminal_interviews(postgres_database):
     old_terminal, _ = await _create_interview(buss_id="BUSS-OLD-TERMINAL")
+    old_cancelled, _ = await _create_interview(buss_id="BUSS-OLD-CANCELLED")
     fresh_terminal, _ = await _create_interview(buss_id="BUSS-FRESH-TERMINAL")
     old_active, _ = await _create_interview(buss_id="BUSS-OLD-ACTIVE")
 
     await complete_interview(old_terminal.session_id, "completed", {"result": "old"}, [])
+    await complete_interview(
+        old_cancelled.session_id, "cancelled", None, [], terminal_reason="operator_terminated"
+    )
     await complete_interview(fresh_terminal.session_id, "completed", {"result": "fresh"}, [])
     await update_interview_status(old_active.session_id, "joining")
 
     async with database_session() as session:
         async with session.begin():
             old_row = await session.get(Interview, old_terminal.session_id)
+            cancelled_row = await session.get(Interview, old_cancelled.session_id)
             active_row = await session.get(Interview, old_active.session_id)
-            assert old_row is not None and active_row is not None
+            assert old_row is not None and cancelled_row is not None and active_row is not None
             old_timestamp = old_row.completed_at - timedelta(days=91)
             old_row.completed_at = old_timestamp
             old_row.updated_at = old_timestamp
+            cancelled_row.completed_at = old_timestamp
+            cancelled_row.updated_at = old_timestamp
             active_row.created_at = old_timestamp
             active_row.updated_at = old_timestamp
 
     summary = await cleanup_expired_interviews(retention_days=90)
-    assert summary["interviews_deleted"] == 1
+    assert summary["interviews_deleted"] == 2
     assert await get_interview_by_buss_id(old_terminal.buss_id) is None
+    assert await get_interview_by_buss_id(old_cancelled.buss_id) is None
     assert await get_interview_by_buss_id(fresh_terminal.buss_id) is not None
     remaining_active = await get_interview_by_buss_id(old_active.buss_id)
     assert remaining_active is not None

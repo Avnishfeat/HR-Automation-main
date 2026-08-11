@@ -110,6 +110,7 @@ class SessionStatus:
     COMPLETED_NO_ANALYSIS: Final[str] = "completed_no_analysis"
     TIME_LIMIT_REACHED: Final[str] = "time_limit_reached"
     INTERRUPTED: Final[str] = "interrupted"
+    CANCELLED: Final[str] = "cancelled"
 
     ERROR_CAPACITY_REACHED: Final[str] = "error_capacity_reached"
     ERROR_JOIN_FAILED: Final[str] = "error_join_failed"
@@ -128,11 +129,42 @@ class TerminationReason:
     TIME_LIMIT_REACHED: Final[str] = "time_limit_reached"
     CANDIDATE_LEFT: Final[str] = "candidate_left"
     MULTIPLE_PARTICIPANTS: Final[str] = "multiple_participants"
+    OPERATOR_TERMINATED: Final[str] = "operator_terminated"
+
+
+class FailureReason:
+    BROWSER_JOIN_TIMEOUT: Final[str] = "browser_join_timeout"
+    CANDIDATE_WAIT_TIMEOUT: Final[str] = "candidate_wait_timeout"
+    STT_TURN_TIMEOUT: Final[str] = "stt_turn_timeout"
+    LLM_GENERATION_TIMEOUT: Final[str] = "llm_generation_timeout"
+    TTS_PLAYBACK_TIMEOUT: Final[str] = "tts_playback_timeout"
+    ANALYSIS_TIMEOUT: Final[str] = "analysis_timeout"
+    CLEANUP_TIMEOUT: Final[str] = "cleanup_timeout"
 
 
 class InterruptionReason:
     BACKEND_SHUTDOWN: Final[str] = "backend_shutdown"
     BACKEND_RESTARTED: Final[str] = "backend_restarted"
+
+
+TERMINAL_SESSION_STATUSES: Final[frozenset[str]] = frozenset({
+    SessionStatus.COMPLETED,
+    SessionStatus.COMPLETED_NO_ANALYSIS,
+    SessionStatus.TIME_LIMIT_REACHED,
+    SessionStatus.INTERRUPTED,
+    SessionStatus.CANCELLED,
+    SessionStatus.ERROR_CAPACITY_REACHED,
+    SessionStatus.ERROR_JOIN_FAILED,
+    SessionStatus.ERROR_CANDIDATE_NO_SHOW,
+    SessionStatus.ERROR_CANDIDATE_LEFT,
+    SessionStatus.ERROR_MULTIPLE_PARTICIPANTS,
+    SessionStatus.ERROR_ANALYSIS_EMPTY,
+    SessionStatus.ERROR_ANALYSIS_FAILED,
+    SessionStatus.ERROR_FATAL_TASK,
+    SessionStatus.TERMINATED_LIVENESS_FAIL,
+    SessionStatus.ABORTED_MULTIPLE_PARTICIPANTS,
+    SessionStatus.ABORTED_MULTIPLE_PARTICIPANTS_TIMEOUT,
+})
 
 class StaticMessages:
     # Cache keys
